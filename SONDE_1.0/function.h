@@ -1,0 +1,12 @@
+#pragma once
+#include "variable.h"
+
+#define float16_t unsigned short
+
+void halfToFloat(const uint16_t * half, uint32_t * f, int count);
+void floatToHalf(const uint32_t * ft, uint16_t * half, int count);
+
+GP_DATA READ_BLOK_GP_DATA_DEV(ifstream &fin, int n);
+float RO_dFI(SONDE_PARAM param, double dfi);
+float dFI(SONDE_PARAM param, float Ro);
+float Vzz_inf_cyl_Doll(SONDE_PARAM param, float Ro_p, float Ro_zp, float r_zp);
