@@ -67,15 +67,15 @@ int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
 
-const char * Metro_name = "C:\\EXP\\NEW_DLL_TEST\\metro_autonm_5Tx.bin";
+const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_autonm_5Tx.bin";
 //const char * Metro_name =   "C:\\EXP\\NEW_DLL_TEST\\metro_107.bin";
 
 //const char* Data_Name = "C:\\EXP\\NEW_DLL_TEST\\LWD_106_NEW.DEV";
 //const char* Data_Name = "C:\\EXP\\NEW_DLL_TEST\\autonom_5Tx_KIS.DEV";
 //const char* Data_Name = "D:\\InducRAM_107.DEV";
-const char* Data_Name = "D:\\autonom_5Tx.DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
-const char *Pallete_dir = "D:\\PALLETE\\INF_CYL_PALLETE\\";
+const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
 const char * iñp_file_name = "D:\\PALLETE\\INF_CYL_PALLETE\\inf_syl_pallete_exp.icp";
 
 
