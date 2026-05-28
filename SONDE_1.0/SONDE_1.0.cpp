@@ -402,8 +402,6 @@ int main()
 	                             
 	if (!LoadSondeLibrary()) {
 		cout << "SONDE DLL was not loaded. Put a compatible SONDE_DLL_1.0.dll next to SONDE_1.0.exe or update the DLL path." << endl;
-		getchar();
-		return 1;
 	}
 	create_inf_cyl_Pallete = (Create_inf_cyl_Pallete)GetProcAddress(SONDE_3_C, "create_inf_cyl_Pallete");
 	if (!create_inf_cyl_Pallete)	cout << "Unable to find the function 'create_inf_cyl_Pallete' " << endl;
@@ -486,7 +484,6 @@ int main()
 		cout << "SONDE DLL is loaded, but it does not contain all functions required by this test project." << endl;
 		cout << "Use the updated SONDE_DLL_1.0.dll from the DLL project with the same platform as this executable." << endl;
 		FreeLibrary(SONDE_3_C);
-		getchar();
 		return 1;
 	}
 
