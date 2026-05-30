@@ -1,4 +1,4 @@
-#include "stdafx.h"
+п»ї#include "stdafx.h"
 #include <cstdio>
 #include <windows.h>
 #include <fstream>
@@ -21,9 +21,7 @@ using namespace System::Windows::Forms::DataVisualization::Charting;
 using namespace System::Runtime::InteropServices;
 double eps = 1;
 
-HINSTANCE SONDE_3_C;// Объявляем идентификатор библиотеки
-typedef int(*Create_inf_cyl_Pallete)(const char *, const char *, bool*, uint32_t* );
-typedef int(*Create_vzz_2layer_Pallete)(void *, void *, bool *, uint32_t *);
+HINSTANCE SONDE_3_C;// РћР±СЉСЏРІР»СЏРµРј РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ Р±РёР±Р»РёРѕС‚РµРєРё
 typedef int(*Sonde_set)(const char *, const char *);
 typedef int(*Borehole_offset)(float, int );
 typedef int(*Get_express_data)(void *, PHASE *, Ro *rho, int );
@@ -31,7 +29,6 @@ typedef int(*Get_Phase)(void *, PHASE*, int);
 typedef int(*Get_condition)(void *, uint32_t *, int);
 typedef uint8_t(*Simmetry)(PHASE*, PHASE*, uint32_t);
 typedef int(*Calculate_Rho_AF)(PHASE*, Ro *, float, int, int, int, SERVICE*);
-typedef int(*Calculate_Rho_AS)(PHASE*, Ro *, int, int, SERVICE*);
 typedef int(*Ph_shift_smt_ph)(PHASE *, Ro *, PHASE *);
 typedef int(*Ph_shift_smt_ro)(Ro *, Ro *, PHASE *);
 typedef int(*Ro_corr_ref_point)(const char *, Ro *, Ro *,Ro *, Ro *);
@@ -39,8 +36,6 @@ typedef int(*Ph_smt_ro)(Ro *, PHASE *);
 typedef void(*Debug_mode)(bool);
 typedef int(*Calculate_Rho_Doll_GR)(PHASE*, Ro *);
 
-Create_inf_cyl_Pallete create_inf_cyl_Pallete;
-Create_vzz_2layer_Pallete create_vzz_2layer_Pallete;
 Sonde_set  sonde_set;  
 Borehole_offset  borehole_offset;  
 Get_express_data get_express_data;
@@ -48,7 +43,6 @@ Get_Phase get_Phase;
 Get_condition get_condition;
 Simmetry simmetry;
 Calculate_Rho_AF  calculate_Rho_AF;
-Calculate_Rho_AS  calculate_Rho_AS;
 Ph_shift_smt_ph ph_shift_smt_ph;
 Ph_shift_smt_ro ph_shift_smt_ro;
 Ro_corr_ref_point ro_corr_ref_point;
@@ -67,22 +61,21 @@ int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
 
-const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_autonm_5Tx.bin";
+const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_LWD_109_008_2024_.bin";
+//const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_autonm_5Tx.bin";
 //const char * Metro_name =   "C:\\EXP\\NEW_DLL_TEST\\metro_107.bin";
 
 //const char* Data_Name = "C:\\EXP\\NEW_DLL_TEST\\LWD_106_NEW.DEV";
 //const char* Data_Name = "C:\\EXP\\NEW_DLL_TEST\\autonom_5Tx_KIS.DEV";
 //const char* Data_Name = "D:\\InducRAM_107.DEV";
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
+//const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
-const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
-const char * iсp_file_name = "D:\\PALLETE\\INF_CYL_PALLETE\\inf_syl_pallete_exp.icp";
+//const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
+//const char * icp_file_name = "D:\\PALLETE\\INF_CYL_PALLETE\\inf_syl_pallete_exp.icp";
 
-
-
-INF_CYL_PALLETE_FILE_HEADER header = { 0, };
-vector<INF_CYL_PALLETE_R > inf_cyl_pallete_r;
-ifstream pallete_in;
+//INF_CYL_PALLETE_FILE_HEADER header = { 0, };
+//vector<INF_CYL_PALLETE_R > inf_cyl_pallete_r;
 ifstream fin;
 ofstream fout;
 GP_METROLOGY metro = { 0 };
@@ -159,10 +152,10 @@ bool RequiredDllFunctionsLoaded() {
 [STAThread]
 int main()
 {
-	cout << " header_size " << sizeof(header) << endl;
+	//cout << " header_size " << sizeof(header) << endl;
 	//create_bessel_pallete();
 
-#pragma region инициализация формы для отображения графиков
+#pragma region РёРЅРёС†РёР°Р»РёР·Р°С†РёСЏ С„РѕСЂРјС‹ РґР»СЏ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ РіСЂР°С„РёРєРѕРІ
 
 	Application::EnableVisualStyles();
 	int width = 1200;
@@ -403,14 +396,6 @@ int main()
 	if (!LoadSondeLibrary()) {
 		cout << "SONDE DLL was not loaded. Put a compatible SONDE_DLL_1.0.dll next to SONDE_1.0.exe or update the DLL path." << endl;
 	}
-	create_inf_cyl_Pallete = (Create_inf_cyl_Pallete)GetProcAddress(SONDE_3_C, "create_inf_cyl_Pallete");
-	if (!create_inf_cyl_Pallete)	cout << "Unable to find the function 'create_inf_cyl_Pallete' " << endl;
-	else cout << "create_inf_cyl_Pallete ok " << endl;
-
-	create_vzz_2layer_Pallete = (Create_vzz_2layer_Pallete)GetProcAddress(SONDE_3_C, "create_vzz_2layer_Pallete");
-	if (!create_vzz_2layer_Pallete)	cout << "Unable to find the function 'create_vzz_2layer_Pallete' " << endl;
-	else cout << "create_vzz_2layer_Pallete ok " << endl;
-	
 	sonde_set = (Sonde_set)GetProcAddress(SONDE_3_C, "sonde_set");
 	if (!sonde_set)	cout << "Unable to find the function 'sonde_set' " << endl;
 	else cout << "sonde_set is  ok" << endl;
@@ -424,57 +409,52 @@ int main()
 	else cout << "get_express_data is  ok" << endl;
 	
 	get_Phase = (Get_Phase)GetProcAddress(SONDE_3_C, "get_Phase");
-	if (!get_Phase)	// Проверяем полученный указатель
+	if (!get_Phase)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'get_Phase' " << endl;
 	else cout << "get_Phase is  ok" << endl;
 
 	get_condition = (Get_condition)GetProcAddress(SONDE_3_C, "get_condition");
-	if (!get_condition)	// Проверяем полученный указатель
+	if (!get_condition)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'get_condition' " << endl;
 	else cout << "get_condition is  ok" << endl;
 
 	simmetry = (Simmetry)GetProcAddress(SONDE_3_C, "simmetry");
-	if (!simmetry)	// Проверяем полученный указатель
+	if (!simmetry)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'simmetry' " << endl;
 	else cout << "simmetry is  ok" << endl;
 
 	calculate_Rho_AF = (Calculate_Rho_AF)GetProcAddress(SONDE_3_C, "calculate_Rho_AF");
-	if (!calculate_Rho_AF)	// Проверяем полученный указатель
+	if (!calculate_Rho_AF)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'calculate_Rho_AF' " << endl;
 	else cout << "calculate_Rho_AF is  ok" << endl;
 
-	calculate_Rho_AS = (Calculate_Rho_AS)GetProcAddress(SONDE_3_C, "calculate_Rho_AS");
-	if (!calculate_Rho_AS)	// Проверяем полученный указатель
-		cout << "Unable to find the function 'calculate_Rho_AS' " << endl;
-	else cout << "calculate_Rho_AS is  ok" << endl;
-
 	ph_shift_smt_ph = (Ph_shift_smt_ph)GetProcAddress(SONDE_3_C, "ph_shift_smt_ph");
-	if (!ph_shift_smt_ph)	// Проверяем полученный указатель
+	if (!ph_shift_smt_ph)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'ph_shift_smt_ph' " << endl;
 	else cout << "ph_shift_smt_ph is  ok" << endl;
 
 	ph_shift_smt_ro = (Ph_shift_smt_ro)GetProcAddress(SONDE_3_C, "ph_shift_smt_ro");
-	if (!ph_shift_smt_ro)	// Проверяем полученный указатель
+	if (!ph_shift_smt_ro)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'ph_shift_smt_ro' " << endl;
 	else cout << "ph_shift_smt_ro is  ok" << endl;
 
 	ro_corr_ref_point = (Ro_corr_ref_point)GetProcAddress(SONDE_3_C, "ro_corr_ref_point");
-	if (!ro_corr_ref_point)	// Проверяем полученный указатель
+	if (!ro_corr_ref_point)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'ro_corr_ref_point' " << endl;
 	else cout << "ro_corr_ref_point is  ok" << endl;
 
 	ph_smt_ro = (Ph_smt_ro)GetProcAddress(SONDE_3_C, "ph_smt_ro");
-	if (!ph_smt_ro)	// Проверяем полученный указатель
+	if (!ph_smt_ro)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'ph_smt_ph' " << endl;
 	else cout << "ph_smt_ro is  ok" << endl;
 
 	debug_mode = (Debug_mode)GetProcAddress(SONDE_3_C, "debug_mode");
-	if (!debug_mode)	// Проверяем полученный указатель
+	if (!debug_mode)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'debug_mode' " << endl;
 	else cout << "debug_mode is  ok" << endl;
 
 	calculate_Rho_Doll_GR = (Calculate_Rho_Doll_GR)GetProcAddress(SONDE_3_C, "calculate_Rho_Doll_GR");
-	if (!calculate_Rho_Doll_GR)	// Проверяем полученный указатель
+	if (!calculate_Rho_Doll_GR)	// РџСЂРѕРІРµСЂСЏРµРј РїРѕР»СѓС‡РµРЅРЅС‹Р№ СѓРєР°Р·Р°С‚РµР»СЊ
 		cout << "Unable to find the function 'calculate_Rho_Doll_GR' " << endl;
 	else cout << "calculate_Rho_Doll_GR is  ok" << endl;
 
@@ -489,7 +469,7 @@ int main()
 
 	debug_mode(1);
 	/*
-	pallete_in.open(iсp_file_name, ios::binary);//читаем header
+	pallete_in.open(iСЃp_file_name, ios::binary);//С‡РёС‚Р°РµРј header
 	if (!pallete_in.is_open()) {
 		cout << "Vzz_inf_cyl_pallete file not open " << endl;
 	}
@@ -522,7 +502,7 @@ int main()
 	bool *start_stop = new bool;
 	*start_stop = true;
 	uint32_t *persent = new uint32_t;
-	 //create_inf_cyl_Pallete(Metro_name, iсp_file_name, start_stop, persent) ;
+	 //create_inf_cyl_Pallete(Metro_name, iСЃp_file_name, start_stop, persent) ;
 
 	int file_frames = 0;
 	int struct_size = 11 + sizeof(GP_DATA);
@@ -530,24 +510,24 @@ int main()
 	int end_frame = 0;
 	float Ro_bh = 0.0f;
 	int D_bh_mm = 0;
-	int N_Tx = 5;
-	//требуемое УЭС
+	int N_Tx = 4; // LWD РїСЂРёР±РѕСЂ РёРјРµРµС‚ 4 РїРµСЂРµРґР°С‚С‡РёРєР°
+	//С‚СЂРµР±СѓРµРјРѕРµ РЈР­РЎ
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			ro_need.Ro[freq][Tx] = 40.0f;
 		}
 	}
 
-	fin.open(Metro_name, ios::binary);//открываем  файл данных
+	fin.open(Metro_name, ios::binary);//РѕС‚РєСЂС‹РІР°РµРј  С„Р°Р№Р» РґР°РЅРЅС‹С…
 	if (fin.is_open()) {
 		fin.read((char*)&metro, sizeof(GP_DATA));
 		cout << "metrofile is open " << file_frames << endl;
 	}
 	fin.close();
 
-	cout << "sonde set " << sonde_set(Metro_name, Pallete_dir) << endl;
+	cout << "sonde set " << sonde_set(Metro_name, nullptr) << endl;
 
-	fin.open(Data_Name, ios::binary);//открываем  файл данных
+	fin.open(Data_Name, ios::binary);//РѕС‚РєСЂС‹РІР°РµРј  С„Р°Р№Р» РґР°РЅРЅС‹С…
 	if (fin.is_open()) {
 		fin.seekg(0, ios::end);
 		file_frames = int(fin.tellg()) / struct_size;
@@ -555,7 +535,7 @@ int main()
 	}
 	fin.close();
 
-	fin.open(Data_Name, ios::binary);//открываем  файл данных
+	fin.open(Data_Name, ios::binary);//РѕС‚РєСЂС‹РІР°РµРј  С„Р°Р№Р» РґР°РЅРЅС‹С…
 	for (int n = 0; n < file_frames; n++) {
 		gp_data = READ_BLOK_GP_DATA_DEV(fin, n);
 
@@ -631,7 +611,7 @@ int main()
 
 
 	
-	//вводим фазу и требуемое УЭС для данной точки и получаем необходимую фазовую поправку
+	//РІРІРѕРґРёРј С„Р°Р·Сѓ Рё С‚СЂРµР±СѓРµРјРѕРµ РЈР­РЎ РґР»СЏ РґР°РЅРЅРѕР№ С‚РѕС‡РєРё Рё РїРѕР»СѓС‡Р°РµРј РЅРµРѕР±С…РѕРґРёРјСѓСЋ С„Р°Р·РѕРІСѓСЋ РїРѕРїСЂР°РІРєСѓ
 	cout << "ph_smt_806 ";
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
@@ -648,13 +628,13 @@ int main()
 		}
 	}
 	cout << endl;
-	//отнимаем от фазы поправку
+	//РѕС‚РЅРёРјР°РµРј РѕС‚ С„Р°Р·С‹ РїРѕРїСЂР°РІРєСѓ
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			phase_smt_1923.Phase[freq][Tx] -= Phase_shift.Phase[freq][Tx] ;
 		}
 	}
-	//считаем УЭС от фазы с поправкой 
+	//СЃС‡РёС‚Р°РµРј РЈР­РЎ РѕС‚ С„Р°Р·С‹ СЃ РїРѕРїСЂР°РІРєРѕР№ 
 	calculate_Rho_AF(&phase_smt_1923, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
@@ -662,7 +642,7 @@ int main()
 		}
 	}
 	cout << endl;
-	//вводим УЭС и  требуемое УЭС для данной точки и получаем необходимую фазовую поправку///////////////////////////////////////////////////////////////////////////////////////
+	//РІРІРѕРґРёРј РЈР­РЎ Рё  С‚СЂРµР±СѓРµРјРѕРµ РЈР­РЎ РґР»СЏ РґР°РЅРЅРѕР№ С‚РѕС‡РєРё Рё РїРѕР»СѓС‡Р°РµРј РЅРµРѕР±С…РѕРґРёРјСѓСЋ С„Р°Р·РѕРІСѓСЋ РїРѕРїСЂР°РІРєСѓ///////////////////////////////////////////////////////////////////////////////////////
 	ph_shift_smt_ro(&ro_2043, &ro_need, &Phase_shift);
 	cout << "ph_shift_smt_ro ";
 	for (int freq = 0; freq < 2; freq++) {
@@ -671,13 +651,13 @@ int main()
 		}
 	}
 	cout << endl;
-	//отнимаем от фазы поправку
+	//РѕС‚РЅРёРјР°РµРј РѕС‚ С„Р°Р·С‹ РїРѕРїСЂР°РІРєСѓ
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			phase_smt_2043_corr.Phase[freq][Tx] = phase_smt_2043.Phase[freq][Tx] - Phase_shift.Phase[freq][Tx];
 		}
 	}
-	//считаем УЭС от фазы с поправкой 
+	//СЃС‡РёС‚Р°РµРј РЈР­РЎ РѕС‚ С„Р°Р·С‹ СЃ РїРѕРїСЂР°РІРєРѕР№ 
 	calculate_Rho_AF(&phase_smt_2043_corr, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
@@ -689,7 +669,7 @@ int main()
 	
 	///////////////////////////////////////////////////////////////////////////
 	
-	FreeLibrary(SONDE_3_C);	// Освобождаем библиотеку
+	FreeLibrary(SONDE_3_C);	// РћСЃРІРѕР±РѕР¶РґР°РµРј Р±РёР±Р»РёРѕС‚РµРєСѓ
 	Application::Run(form);
 	getchar(); getchar();
 	return 0;
