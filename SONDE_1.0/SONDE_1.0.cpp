@@ -72,7 +72,8 @@ const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_
 //const char* Data_Name = "C:\\EXP\\NEW_DLL_TEST\\autonom_5Tx_KIS.DEV";
 //const char* Data_Name = "D:\\InducRAM_107.DEV";
 
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
+//const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
 //const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
@@ -282,14 +283,16 @@ int main()
 	chart5->ChartAreas["ChartArea1"]->CursorY->Interval = 0.0000001;
 
 
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 5; i++) {
 		chart5->Series->Add("series" + i);
 		chart5->Series[i]->ChartType = SeriesChartType::Line;
 		chart5->Series[i]->BorderWidth = 2;
 	}
-	chart5->Series[0]->LegendText = L"Ro_p 400";
-	chart5->Series[1]->LegendText = L"Ro_zp 400";
-	chart5->Series[2]->LegendText = L"R_zp 400";
+	chart5->Series[0]->LegendText = L"Ph T1 400";
+	chart5->Series[1]->LegendText = L"Ph T2 400";
+	chart5->Series[2]->LegendText = L"Ph T3 400";
+	chart5->Series[3]->LegendText = L"Ph T4 400";
+	chart5->Series[4]->LegendText = L"Ro_p";
 
 	Chart^  chart6 = (gcnew Chart());
 	form->Controls->Add(chart6);
@@ -304,14 +307,16 @@ int main()
 	chart6->ChartAreas["ChartArea1"]->CursorY->Interval = 0.0000001;
 
 
-	for (int i = 0; i < 3; i++) {
+	for (int i = 0; i < 5; i++) {
 		chart6->Series->Add("series" + i);
 		chart6->Series[i]->ChartType = SeriesChartType::Line;
 		chart6->Series[i]->BorderWidth = 2;
 	}
-	chart6->Series[0]->LegendText = L"Ro_p 2000";
-	chart6->Series[1]->LegendText = L"Ro_zp 2000";
-	chart6->Series[2]->LegendText = L"R_zp 2000";
+	chart6->Series[0]->LegendText = L"Ph T1 2000";
+	chart6->Series[1]->LegendText = L"Ph T2 2000";
+	chart6->Series[2]->LegendText = L"Ph T3 2000";
+	chart6->Series[3]->LegendText = L"Ph T4 2000";
+	chart6->Series[4]->LegendText = L"Ro_p";
 
 	Chart^  chart7 = (gcnew Chart());
 	form->Controls->Add(chart7);
@@ -577,15 +582,14 @@ int main()
 
 		calculate_Rho_AF(&phase_smt, &ro_AF, ro_bh, D_bhole_nom, pz_400, pz_2000, &service_AF);
 		calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
-		// нейросетевые результаты зоны проникновения (calculate_Rho_AF)
-		// chart5 — 400 кГц, chart6 — 2000 кГц; три кривые: Ro_p, Ro_zp, R_zp
-		chart5->Series[0]->Points->AddXY(n, ro_AF.Ro_p[_400_kGz]);
-		chart5->Series[1]->Points->AddXY(n, ro_AF.Ro_zp[_400_kGz]);
-		chart5->Series[2]->Points->AddXY(n, ro_AF.R_zp[_400_kGz]);
-
-		chart6->Series[0]->Points->AddXY(n, ro_AF.Ro_p[_2000_kGz]);
-		chart6->Series[1]->Points->AddXY(n, ro_AF.Ro_zp[_2000_kGz]);
-		chart6->Series[2]->Points->AddXY(n, ro_AF.R_zp[_2000_kGz]);
+		// Отладочный вывод: 4 симметризованных фазы + Ro_p для анализа работы нейросети
+		// chart5 — фазы 400 кГц + Ro_p, chart6 — фазы 2000 кГц + Ro_p
+		for (int Tx = 0; Tx < N_Tx; Tx++) {
+			chart5->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_400_kGz][Tx] * mG);
+			chart6->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_2000_kGz][Tx] * mG);
+		}
+		chart5->Series[4]->Points->AddXY(n, ro_AF.Ro_p[_400_kGz]);
+		chart6->Series[4]->Points->AddXY(n, ro_AF.Ro_p[_2000_kGz]);
 
 		
 
