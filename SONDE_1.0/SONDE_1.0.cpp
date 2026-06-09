@@ -120,7 +120,8 @@ const char* Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrolo
 
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\InducRAM_cut_0_1400_09_06_2026_cut_1200_2367_09_06_2026.DEV";
+//const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\InducRAM_cut_0_1400_09_06_2026_cut_1200_2367_09_06_2026.DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Copy(1).DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
 //const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
@@ -541,28 +542,28 @@ int main()
 	chart6->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза, мГрад";
 	chart6->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
 
-	// chart7: модельные симм. фазы 400 кГц с учётом зоны проникновения + Ro_p
-	chart7->Series[0]->LegendText = L"Ph_zp T1 400";
-	chart7->Series[1]->LegendText = L"Ph_zp T2 400";
-	chart7->Series[2]->LegendText = L"Ph_zp T3 400";
-	chart7->Series[3]->LegendText = L"Ph_zp T4 400";
+	// chart7: УЭС 400 кГц из структуры (FROM_SONDE) + Ro_p
+	chart7->Series[0]->LegendText = L"Ro T1 400";
+	chart7->Series[1]->LegendText = L"Ro T2 400";
+	chart7->Series[2]->LegendText = L"Ro T3 400";
+	chart7->Series[3]->LegendText = L"Ro T4 400";
 	chart7->Series[4]->LegendText = L"Ro_p";
 	chart7->Series[4]->YAxisType = AxisType::Secondary;
 	chart7->Series[4]->BorderWidth = 3;
 	chart7->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
-	chart7->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза (ЗП), мГрад";
+	chart7->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
 	chart7->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
 
-	// chart8: модельные симм. фазы 2000 кГц с учётом зоны проникновения + Ro_p
-	chart8->Series[0]->LegendText = L"Ph_zp T1 2000";
-	chart8->Series[1]->LegendText = L"Ph_zp T2 2000";
-	chart8->Series[2]->LegendText = L"Ph_zp T3 2000";
-	chart8->Series[3]->LegendText = L"Ph_zp T4 2000";
+	// chart8: УЭС 2000 кГц из структуры (FROM_SONDE) + Ro_p
+	chart8->Series[0]->LegendText = L"Ro T1 2000";
+	chart8->Series[1]->LegendText = L"Ro T2 2000";
+	chart8->Series[2]->LegendText = L"Ro T3 2000";
+	chart8->Series[3]->LegendText = L"Ro T4 2000";
 	chart8->Series[4]->LegendText = L"Ro_p";
 	chart8->Series[4]->YAxisType = AxisType::Secondary;
 	chart8->Series[4]->BorderWidth = 3;
 	chart8->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
-	chart8->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза (ЗП), мГрад";
+	chart8->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
 	chart8->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
 
 #pragma endregion 
@@ -819,19 +820,17 @@ int main()
 		// Нейросеть возвращает единое Ro_p на обе частоты, поэтому одно и то же
 		// значение выводится на вторичную ось всех четырёх графиков.
 		float ro_p = ro_AF.Ro_p[_400_kGz];
-		// Модельные симметризованные фазы с учётом зоны проникновения:
-		// прямая задача по триплету нейросети (Ro_p, Ro_zp, R_zp) из ro_AF.
-		//ph_smt_zp_cached(&ro_AF, &phase_zp);
+		// Графики 7-8 выводят сопротивления (как графики 3-4) с добавлением Ro_p
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			chart5->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
 			chart6->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
-			//chart7->Series[Tx]->Points->AddXY(n, phase_zp.Phase[_400_kGz][Tx] * mG);
-			//chart8->Series[Tx]->Points->AddXY(n, phase_zp.Phase[_2000_kGz][Tx] * mG);
+			chart7->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
+			chart8->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
 		}
 		chart5->Series[4]->Points->AddXY(n, ro_p);
 		chart6->Series[4]->Points->AddXY(n, ro_p);
-		//chart7->Series[4]->Points->AddXY(n, ro_p);
-		//chart8->Series[4]->Points->AddXY(n, ro_p);
+		chart7->Series[4]->Points->AddXY(n, ro_p);
+		chart8->Series[4]->Points->AddXY(n, ro_p);
 
 		
 
@@ -932,4 +931,3 @@ int main()
 	return 0;
 
 }
-
