@@ -35,6 +35,7 @@ typedef int(*Ro_corr_ref_point)(const char *, Ro *, Ro *,Ro *, Ro *);
 typedef int(*Ph_smt_ro)(Ro *, PHASE *);
 typedef void(*Debug_mode)(bool);
 typedef int(*Calculate_Rho_Doll_GR)(PHASE*, Ro *);
+typedef int(*Ph_smt_zp)(Ro *, PHASE *);
 
 Sonde_set  sonde_set;  
 Borehole_offset  borehole_offset;  
@@ -49,8 +50,9 @@ Ro_corr_ref_point ro_corr_ref_point;
 Ph_smt_ro ph_smt_ro;
 Debug_mode debug_mode;
 Calculate_Rho_Doll_GR calculate_Rho_Doll_GR;
+Ph_smt_zp ph_smt_zp;
 
-struct PHASE phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen, phase_smt_2043, phase_smt_2043_corr, phase_smt_1923, Phase_shift = { 0 };
+struct PHASE phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen, phase_smt_2043, phase_smt_2043_corr, phase_smt_1923, Phase_shift = { 0 }, phase_zp = { 0 };
 struct Ro ro_express = { 0 }, ro_need, ro_2043, ro_AF = { 0 }, ro_required;
 uint32_t condition = 0;
 int shift = 0;
@@ -61,8 +63,52 @@ int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
 
-const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_LWD_109_008_2024_.bin";
+// Cache for invasion-zone phase calculations to avoid redundant numerical integration
+struct CacheKey {
+	int Ro_p_q;
+	int Ro_zp_q;
+	int R_zp_q;
+	bool operator==(const CacheKey& other) const {
+		return Ro_p_q == other.Ro_p_q && Ro_zp_q == other.Ro_zp_q && R_zp_q == other.R_zp_q;
+	}
+};
+
+struct CacheEntry {
+	CacheKey key;
+	PHASE phase;
+};
+
+std::vector<CacheEntry> phase_zp_cache;
+const float kQuantStepRo = 0.1f;
+const float kQuantStepR = 1.0f;
+
+// Helper function to compute invasion-zone phases with caching
+void ph_smt_zp_cached(Ro* ro_AF, PHASE* phase_zp) {
+	// Quantize parameters to create cache key
+	CacheKey key;
+	key.Ro_p_q = static_cast<int>(ro_AF->Ro_p[0] / kQuantStepRo);
+	key.Ro_zp_q = static_cast<int>(ro_AF->Ro_zp[0] / kQuantStepRo);
+	key.R_zp_q = static_cast<int>(ro_AF->R_zp[0] / kQuantStepR);
+
+	// Search cache
+	for (const auto& entry : phase_zp_cache) {
+		if (entry.key == key) {
+			*phase_zp = entry.phase;
+			return;
+		}
+	}
+
+	// Cache miss: compute and store
+	ph_smt_zp(ro_AF, phase_zp);
+	CacheEntry new_entry;
+	new_entry.key = key;
+	new_entry.phase = *phase_zp;
+	phase_zp_cache.push_back(new_entry);
+}
+
+//const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_LWD_109_008_2024_.bin";
 //const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_autonm_5Tx.bin";
+const char* Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrology.bin";
 
 
 //const char * Metro_name =   "C:\\EXP\\NEW_DLL_TEST\\metro_107.bin";
@@ -73,7 +119,8 @@ const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_
 //const char* Data_Name = "D:\\InducRAM_107.DEV";
 
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
+//const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\InducRAM_cut_0_1400_09_06_2026_cut_1200_2367_09_06_2026.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
 //const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
@@ -152,8 +199,76 @@ bool RequiredDllFunctionsLoaded() {
 	if (!ph_smt_ro) ok = false;
 	if (!debug_mode) ok = false;
 	if (!calculate_Rho_Doll_GR) ok = false;
+	if (!ph_smt_zp) ok = false;
 	return ok;
 }
+// Нормализация фазы (рад) в диапазон (-pi, pi]. Повторяет NormalizePhase
+// эталонного проекта Amk-Horizon-New-Chart для режима вычисления на компьютере.
+static float NormalizePhaseRad(float ph) {
+	const float pi = 3.14159265358979323846f;
+	while (ph > pi) ph -= 2.0f * pi;
+	while (ph <= -pi) ph += 2.0f * pi;
+	return ph;
+}
+
+// Декодирование сигнатуры зонда. Повторяет логику get_sonde_id из SONDE_DLL_NEW
+// (SondeCore.cpp): младшие 20 бит сигнатуры кодируют тип, число передатчиков,
+// модификацию и номер прибора. Используется только для диагностики раскладки.
+struct SONDE_ID_DBG { uint32_t type_, N_Tx, mod, number, type; };
+static SONDE_ID_DBG DecodeSondeId(uint32_t signature) {
+	SONDE_ID_DBG t;
+	uint32_t buff = (signature << 12) >> 12;
+	t.type_ = buff / 100000;
+	t.N_Tx = (buff % 100000) / 10000;
+	t.mod = (buff % 10000) / 1000;
+	t.number = (buff % 1000);
+	t.type = buff / 1000;
+	return t;
+}
+
+// Печать массива [2][5] построчно по частотам для удобства визуальной сверки.
+static void DumpFreqArray(std::ofstream &os, const char *name, const float arr[2][5]) {
+	os << "  " << name << ":\n";
+	os << "    [400 ]: ";
+	for (int t = 0; t < 5; t++) os << std::setw(16) << arr[0][t] << " ";
+	os << "\n    [2000]: ";
+	for (int t = 0; t < 5; t++) os << std::setw(16) << arr[1][t] << " ";
+	os << "\n";
+}
+
+// Диагностический дамп одной записи GP_DATA: декодированная сигнатура, скаляры,
+// все массивы в трактовке [2][5], а также сырое представление 240 байт как
+// последовательности float со смещениями. Позволяет увидеть рассинхрон
+// раскладки 4-передатчикового прибора при чтении как [2][5].
+static void DumpGpDataFrame(std::ofstream &os, int frameIndex, const GP_DATA &d) {
+	SONDE_ID_DBG id = DecodeSondeId(d.signature);
+	os << "================ FRAME " << frameIndex << " ================\n";
+	os << "signature   = " << d.signature << " (0x" << std::hex << d.signature << std::dec << ")\n";
+	os << "  decoded -> type_=" << id.type_ << " N_Tx=" << id.N_Tx
+	   << " mod=" << id.mod << " number=" << id.number << " type=" << id.type << "\n";
+	os << "condition   = " << d.condition << " (0x" << std::hex << d.condition << std::dec << ")\n";
+	os << "frame       = " << d.frame << "\n";
+	os << "temperature = " << d.temperature << "\n";
+	DumpFreqArray(os, "rho_smt  ", d.rho_smt);
+	DumpFreqArray(os, "phase_smt", d.phase_smt);
+	DumpFreqArray(os, "AM_RX_1  ", d.AM_RX_1);
+	DumpFreqArray(os, "AM_RX_2  ", d.AM_RX_2);
+	DumpFreqArray(os, "DELTA_PH ", d.DELTA_PH);
+	os << "  ZERO_AM_RX_1: " << d.ZERO_AM_RX_1[0] << " " << d.ZERO_AM_RX_1[1] << "\n";
+	os << "  ZERO_AM_RX_2: " << d.ZERO_AM_RX_2[0] << " " << d.ZERO_AM_RX_2[1] << "\n";
+	os << "  ZERO_dPH    : " << d.ZERO_dPH[0] << " " << d.ZERO_dPH[1] << "\n";
+
+	// Сырое представление структуры как float с байтовыми смещениями: помогает
+	// определить фактические границы массивов на диске независимо от трактовки [2][5].
+	os << "  RAW floats (offset:value), 60 шт.:\n";
+	const float *raw = reinterpret_cast<const float*>(&d);
+	for (int i = 0; i < (int)(sizeof(GP_DATA) / sizeof(float)); i++) {
+		os << "    off " << std::setw(3) << (i * 4) << " : " << std::setw(16) << raw[i];
+		if ((i % 4) == 3) os << "\n";
+	}
+	os << "\n";
+}
+
 [STAThread]
 int main()
 {
@@ -401,6 +516,55 @@ int main()
 		chart10->Series[i]->BorderWidth = 2;
 	}
 
+	// === Конфигурация chart5-8: новые графики FROM_SONDE и FROM_COMPUTER с Ro_p ===
+	// chart5: симм. фазы 400 кГц из структуры (FROM_SONDE) + Ro_p на вторичной оси
+	chart5->Series[0]->LegendText = L"Ph T1 400 (sonde)";
+	chart5->Series[1]->LegendText = L"Ph T2 400 (sonde)";
+	chart5->Series[2]->LegendText = L"Ph T3 400 (sonde)";
+	chart5->Series[3]->LegendText = L"Ph T4 400 (sonde)";
+	chart5->Series[4]->LegendText = L"Ro_p";
+	chart5->Series[4]->YAxisType = AxisType::Secondary;
+	chart5->Series[4]->BorderWidth = 3;
+	chart5->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
+	chart5->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза, мГрад";
+	chart5->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
+
+	// chart6: симм. фазы 2000 кГц из структуры (FROM_SONDE) + Ro_p на вторичной оси
+	chart6->Series[0]->LegendText = L"Ph T1 2000 (sonde)";
+	chart6->Series[1]->LegendText = L"Ph T2 2000 (sonde)";
+	chart6->Series[2]->LegendText = L"Ph T3 2000 (sonde)";
+	chart6->Series[3]->LegendText = L"Ph T4 2000 (sonde)";
+	chart6->Series[4]->LegendText = L"Ro_p";
+	chart6->Series[4]->YAxisType = AxisType::Secondary;
+	chart6->Series[4]->BorderWidth = 3;
+	chart6->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
+	chart6->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза, мГрад";
+	chart6->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
+
+	// chart7: модельные симм. фазы 400 кГц с учётом зоны проникновения + Ro_p
+	chart7->Series[0]->LegendText = L"Ph_zp T1 400";
+	chart7->Series[1]->LegendText = L"Ph_zp T2 400";
+	chart7->Series[2]->LegendText = L"Ph_zp T3 400";
+	chart7->Series[3]->LegendText = L"Ph_zp T4 400";
+	chart7->Series[4]->LegendText = L"Ro_p";
+	chart7->Series[4]->YAxisType = AxisType::Secondary;
+	chart7->Series[4]->BorderWidth = 3;
+	chart7->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
+	chart7->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза (ЗП), мГрад";
+	chart7->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
+
+	// chart8: модельные симм. фазы 2000 кГц с учётом зоны проникновения + Ro_p
+	chart8->Series[0]->LegendText = L"Ph_zp T1 2000";
+	chart8->Series[1]->LegendText = L"Ph_zp T2 2000";
+	chart8->Series[2]->LegendText = L"Ph_zp T3 2000";
+	chart8->Series[3]->LegendText = L"Ph_zp T4 2000";
+	chart8->Series[4]->LegendText = L"Ro_p";
+	chart8->Series[4]->YAxisType = AxisType::Secondary;
+	chart8->Series[4]->BorderWidth = 3;
+	chart8->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
+	chart8->ChartAreas["ChartArea1"]->AxisY->Title = L"Фаза (ЗП), мГрад";
+	chart8->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
+
 #pragma endregion 
 
 #pragma region library DLL
@@ -470,6 +634,11 @@ int main()
 		cout << "Unable to find the function 'calculate_Rho_Doll_GR' " << endl;
 	else cout << "calculate_Rho_Doll_GR is  ok" << endl;
 
+	ph_smt_zp = (Ph_smt_zp)GetProcAddress(SONDE_3_C, "ph_smt_zp");
+	if (!ph_smt_zp)	// Проверяем полученный указатель
+		cout << "Unable to find the function 'ph_smt_zp' " << endl;
+	else cout << "ph_smt_zp is  ok" << endl;
+
 #pragma endregion 
 
 	if (!RequiredDllFunctionsLoaded()) {
@@ -530,12 +699,45 @@ int main()
 		}
 	}
 
+	// Отдельный файл диагностики парсинга, чтобы не смешивать с Test.txt.
+	std::ofstream fdbg("Debug_parse.txt");
+	fdbg << std::fixed << std::setprecision(6);
+
 	fin.open(Metro_name, ios::binary);//открываем  файл данных
 	if (fin.is_open()) {
 		fin.read((char*)&metro, sizeof(GP_DATA));
 		cout << "metrofile is open " << file_frames << endl;
 	}
 	fin.close();
+
+	// Дамп метрологии: размеры структур и геометрия зонда из GP_METROLOGY.
+	if (fdbg.is_open()) {
+		SONDE_ID_DBG mid = DecodeSondeId(metro.signature);
+		fdbg << "######## METROLOGY (" << Metro_name << ") ########\n";
+		fdbg << "sizeof(GP_DATA)      = " << sizeof(GP_DATA) << "\n";
+		fdbg << "sizeof(GP_METROLOGY) = " << sizeof(GP_METROLOGY) << "\n";
+		fdbg << "sizeof(PHASE)        = " << sizeof(PHASE) << "\n";
+		fdbg << "struct_size (rec+11) = " << struct_size << "\n";
+		fdbg << "metro.signature = " << metro.signature
+		     << " -> type_=" << mid.type_ << " N_Tx=" << mid.N_Tx
+		     << " mod=" << mid.mod << " number=" << mid.number << " type=" << mid.type << "\n";
+		fdbg << "metro.serial    = " << metro.serial << "\n";
+		fdbg << "metro.D_sonde_mm= " << metro.D_sonde_mm << "\n";
+		fdbg << "L1[5] = ";
+		for (int i = 0; i < 5; i++) fdbg << metro.L1[i] << " ";
+		fdbg << "\nL2[5] = ";
+		for (int i = 0; i < 5; i++) fdbg << metro.L2[i] << " ";
+		fdbg << "\nF[2]  = " << metro.F[0] << " " << metro.F[1] << "\n";
+		fdbg << "Air_zz     [400 ]: ";
+		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz[0][t] << " ";
+		fdbg << "\nAir_zz     [2000]: ";
+		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz[1][t] << " ";
+		fdbg << "\nAir_zz_amt [400 ]: ";
+		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz_amt[0][t] << " ";
+		fdbg << "\nAir_zz_amt [2000]: ";
+		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz_amt[1][t] << " ";
+		fdbg << "\n\n";
+	}
 
 	cout << "sonde set " << sonde_set(Metro_name, nullptr) << endl;
 
@@ -547,9 +749,24 @@ int main()
 	}
 	fin.close();
 
+	if (fdbg.is_open()) {
+		fdbg << "######## DATA FRAMES (" << Data_Name << "), file_frames="
+		     << file_frames << " ########\n\n";
+	}
+
+	// Флаг однократного уведомления о проблеме разбора структуры кадра.
+	// Сообщение выводится один раз, чтобы не засорять консоль на каждом кадре.
+	bool structure_error_reported = false;
+
 	fin.open(Data_Name, ios::binary);//открываем  файл данных
 	for (int n = 0; n < file_frames; n++) {
 		gp_data = READ_BLOK_GP_DATA_DEV(fin, n);
+
+		// Диагностика: дамп первых кадров (калибровка в воздухе) и нескольких кадров
+		// из середины лога (прибор в породе) для надёжного определения раскладки полей.
+		if (fdbg.is_open() && (n < 3 || n == 300 || n == 600 || n == 900)) {
+			DumpGpDataFrame(fdbg, n, gp_data);
+		}
 
 		int get_ph_result = get_Phase(&gp_data, &phase, shift);
 		//cout << "get_ph_result "<< get_ph_result <<endl;
@@ -559,12 +776,28 @@ int main()
 			//chart3->Series[Tx]->Points->AddXY(n, gp_data.DELTA_PH[_2000_kGz][Tx] * mG);
 			//chart4->Series[Tx]->Points->AddXY(n, phase.Phase[_2000_kGz][Tx] * mG);
 		}
-		get_express_data(&gp_data, &phase_express, &ro_express, shift);
+		int express_result = get_express_data(&gp_data, &phase_express, &ro_express, shift);
+		// Ненулевой код означает, что DLL не смогла разобрать структуру кадра
+		// (например, сигнатура кадра не совпала с метрологией). В этом случае
+		// пользователь уведомляется, а данные кадра на графики не наносятся,
+		// чтобы не отображать заведомо некорректные значения.
+		if (express_result != 0) {
+			if (!structure_error_reported) {
+				cout << "WARNING: get_express_data returned code " << express_result
+				     << " at frame " << n
+				     << ". The data frame layout does not match the loaded metrology "
+				     << "(signature mismatch or unsupported structure). "
+				     << "Verify that the .DEV data file and the metrology .bin belong to the same tool."
+				     << endl;
+				structure_error_reported = true;
+			}
+			continue;
+		}
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			chart1->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
 			chart2->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
 			chart3->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
-			chart4->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]) ;
+			chart4->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
 		}
 		get_condition(&gp_data, &condition, shift);
 		//cout << gp_data.condition << " "  << condition << endl;
@@ -580,16 +813,25 @@ int main()
 		int pz_400 = 0; 
 		int pz_2000 = 0;
 
-		calculate_Rho_AF(&phase_smt, &ro_AF, ro_bh, D_bhole_nom, pz_400, pz_2000, &service_AF);
+		calculate_Rho_AF(&phase_express, &ro_AF, ro_bh, D_bhole_nom, pz_400, pz_2000, &service_AF);
 		calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
-		// Отладочный вывод: 4 симметризованных фазы + Ro_p для анализа работы нейросети
-		// chart5 — фазы 400 кГц + Ro_p, chart6 — фазы 2000 кГц + Ro_p
+		// Графики 5-8 повторяют графики 1-4 (FROM_SONDE) с добавлением Ro_p.
+		// Нейросеть возвращает единое Ro_p на обе частоты, поэтому одно и то же
+		// значение выводится на вторичную ось всех четырёх графиков.
+		float ro_p = ro_AF.Ro_p[_400_kGz];
+		// Модельные симметризованные фазы с учётом зоны проникновения:
+		// прямая задача по триплету нейросети (Ro_p, Ro_zp, R_zp) из ro_AF.
+		//ph_smt_zp_cached(&ro_AF, &phase_zp);
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart5->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_400_kGz][Tx] * mG);
-			chart6->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_2000_kGz][Tx] * mG);
+			chart5->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
+			chart6->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
+			//chart7->Series[Tx]->Points->AddXY(n, phase_zp.Phase[_400_kGz][Tx] * mG);
+			//chart8->Series[Tx]->Points->AddXY(n, phase_zp.Phase[_2000_kGz][Tx] * mG);
 		}
-		chart5->Series[4]->Points->AddXY(n, ro_AF.Ro_p[_400_kGz]);
-		chart6->Series[4]->Points->AddXY(n, ro_AF.Ro_p[_2000_kGz]);
+		chart5->Series[4]->Points->AddXY(n, ro_p);
+		chart6->Series[4]->Points->AddXY(n, ro_p);
+		//chart7->Series[4]->Points->AddXY(n, ro_p);
+		//chart8->Series[4]->Points->AddXY(n, ro_p);
 
 		
 
@@ -622,6 +864,7 @@ int main()
 
 	}
 	fin.close();
+	if (fdbg.is_open()) fdbg.close();
 
 
 	
