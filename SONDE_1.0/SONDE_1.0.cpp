@@ -63,7 +63,7 @@ int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
 
-// Cache for invasion-zone phase calculations to avoid redundant numerical integration
+// Кэш результатов вычисления фаз зоны проникновения для исключения повторного численного интегрирования.
 struct CacheKey {
 	int Ro_p_q;
 	int Ro_zp_q;
@@ -82,15 +82,13 @@ std::vector<CacheEntry> phase_zp_cache;
 const float kQuantStepRo = 0.1f;
 const float kQuantStepR = 1.0f;
 
-// Helper function to compute invasion-zone phases with caching
+// Вычисляет симметризованные фазы зоны проникновения с кэшированием по квантованным параметрам.
 void ph_smt_zp_cached(Ro* ro_AF, PHASE* phase_zp) {
-	// Quantize parameters to create cache key
 	CacheKey key;
 	key.Ro_p_q = static_cast<int>(ro_AF->Ro_p[0] / kQuantStepRo);
 	key.Ro_zp_q = static_cast<int>(ro_AF->Ro_zp[0] / kQuantStepRo);
 	key.R_zp_q = static_cast<int>(ro_AF->R_zp[0] / kQuantStepR);
 
-	// Search cache
 	for (const auto& entry : phase_zp_cache) {
 		if (entry.key == key) {
 			*phase_zp = entry.phase;
@@ -98,7 +96,6 @@ void ph_smt_zp_cached(Ro* ro_AF, PHASE* phase_zp) {
 		}
 	}
 
-	// Cache miss: compute and store
 	ph_smt_zp(ro_AF, phase_zp);
 	CacheEntry new_entry;
 	new_entry.key = key;
@@ -586,57 +583,57 @@ int main()
 	else cout << "get_express_data is  ok" << endl;
 	
 	get_Phase = (Get_Phase)GetProcAddress(SONDE_3_C, "get_Phase");
-	if (!get_Phase)	// Проверяем полученный указатель
+	if (!get_Phase)
 		cout << "Unable to find the function 'get_Phase' " << endl;
 	else cout << "get_Phase is  ok" << endl;
 
 	get_condition = (Get_condition)GetProcAddress(SONDE_3_C, "get_condition");
-	if (!get_condition)	// Проверяем полученный указатель
+	if (!get_condition)
 		cout << "Unable to find the function 'get_condition' " << endl;
 	else cout << "get_condition is  ok" << endl;
 
 	simmetry = (Simmetry)GetProcAddress(SONDE_3_C, "simmetry");
-	if (!simmetry)	// Проверяем полученный указатель
+	if (!simmetry)
 		cout << "Unable to find the function 'simmetry' " << endl;
 	else cout << "simmetry is  ok" << endl;
 
 	calculate_Rho_AF = (Calculate_Rho_AF)GetProcAddress(SONDE_3_C, "calculate_Rho_AF");
-	if (!calculate_Rho_AF)	// Проверяем полученный указатель
+	if (!calculate_Rho_AF)
 		cout << "Unable to find the function 'calculate_Rho_AF' " << endl;
 	else cout << "calculate_Rho_AF is  ok" << endl;
 
 	ph_shift_smt_ph = (Ph_shift_smt_ph)GetProcAddress(SONDE_3_C, "ph_shift_smt_ph");
-	if (!ph_shift_smt_ph)	// Проверяем полученный указатель
+	if (!ph_shift_smt_ph)
 		cout << "Unable to find the function 'ph_shift_smt_ph' " << endl;
 	else cout << "ph_shift_smt_ph is  ok" << endl;
 
 	ph_shift_smt_ro = (Ph_shift_smt_ro)GetProcAddress(SONDE_3_C, "ph_shift_smt_ro");
-	if (!ph_shift_smt_ro)	// Проверяем полученный указатель
+	if (!ph_shift_smt_ro)
 		cout << "Unable to find the function 'ph_shift_smt_ro' " << endl;
 	else cout << "ph_shift_smt_ro is  ok" << endl;
 
 	ro_corr_ref_point = (Ro_corr_ref_point)GetProcAddress(SONDE_3_C, "ro_corr_ref_point");
-	if (!ro_corr_ref_point)	// Проверяем полученный указатель
+	if (!ro_corr_ref_point)
 		cout << "Unable to find the function 'ro_corr_ref_point' " << endl;
 	else cout << "ro_corr_ref_point is  ok" << endl;
 
 	ph_smt_ro = (Ph_smt_ro)GetProcAddress(SONDE_3_C, "ph_smt_ro");
-	if (!ph_smt_ro)	// Проверяем полученный указатель
+	if (!ph_smt_ro)
 		cout << "Unable to find the function 'ph_smt_ph' " << endl;
 	else cout << "ph_smt_ro is  ok" << endl;
 
 	debug_mode = (Debug_mode)GetProcAddress(SONDE_3_C, "debug_mode");
-	if (!debug_mode)	// Проверяем полученный указатель
+	if (!debug_mode)
 		cout << "Unable to find the function 'debug_mode' " << endl;
 	else cout << "debug_mode is  ok" << endl;
 
 	calculate_Rho_Doll_GR = (Calculate_Rho_Doll_GR)GetProcAddress(SONDE_3_C, "calculate_Rho_Doll_GR");
-	if (!calculate_Rho_Doll_GR)	// Проверяем полученный указатель
+	if (!calculate_Rho_Doll_GR)
 		cout << "Unable to find the function 'calculate_Rho_Doll_GR' " << endl;
 	else cout << "calculate_Rho_Doll_GR is  ok" << endl;
 
 	ph_smt_zp = (Ph_smt_zp)GetProcAddress(SONDE_3_C, "ph_smt_zp");
-	if (!ph_smt_zp)	// Проверяем полученный указатель
+	if (!ph_smt_zp)
 		cout << "Unable to find the function 'ph_smt_zp' " << endl;
 	else cout << "ph_smt_zp is  ok" << endl;
 
@@ -820,7 +817,7 @@ int main()
 		// Нейросеть возвращает единое Ro_p на обе частоты, поэтому одно и то же
 		// значение выводится на вторичную ось всех четырёх графиков.
 		float ro_p = ro_AF.Ro_p[_400_kGz];
-		// Графики 7-8 выводят сопротивления (как графики 3-4) с добавлением Ro_p
+		// Графики 5-6 — фазы из структуры; 7-8 — УЭС из структуры. На все четыре выводится Ro_p на вторичной оси.
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			chart5->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
 			chart6->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
@@ -867,7 +864,7 @@ int main()
 
 
 	
-	//вводим фазу и требуемое УЭС для данной точки и получаем необходимую фазовую поправку
+	// По фазе и требуемому УЭС для опорной точки вычисляется фазовая поправка.
 	cout << "ph_smt_806 ";
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
@@ -884,13 +881,11 @@ int main()
 		}
 	}
 	cout << endl;
-	//отнимаем от фазы поправку
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			phase_smt_1923.Phase[freq][Tx] -= Phase_shift.Phase[freq][Tx] ;
 		}
 	}
-	//считаем УЭС от фазы с поправкой 
 	calculate_Rho_AF(&phase_smt_1923, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
@@ -898,7 +893,7 @@ int main()
 		}
 	}
 	cout << endl;
-	//вводим УЭС и  требуемое УЭС для данной точки и получаем необходимую фазовую поправку///////////////////////////////////////////////////////////////////////////////////////
+	// По УЭС и требуемому УЭС для опорной точки вычисляется фазовая поправка.
 	ph_shift_smt_ro(&ro_2043, &ro_need, &Phase_shift);
 	cout << "ph_shift_smt_ro ";
 	for (int freq = 0; freq < 2; freq++) {
@@ -907,13 +902,11 @@ int main()
 		}
 	}
 	cout << endl;
-	//отнимаем от фазы поправку
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			phase_smt_2043_corr.Phase[freq][Tx] = phase_smt_2043.Phase[freq][Tx] - Phase_shift.Phase[freq][Tx];
 		}
 	}
-	//считаем УЭС от фазы с поправкой 
 	calculate_Rho_AF(&phase_smt_2043_corr, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 	for (int freq = 0; freq < 2; freq++) {
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
