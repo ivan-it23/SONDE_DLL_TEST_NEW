@@ -1,4 +1,4 @@
-lib is open Thu Jun 11 13:04:14 2026
+lib is open Thu Jun 11 14:44:43 2026
 
  debug = 1
 sonde_set 0  L1 345 L2 599
@@ -853,5 +853,5 @@ neuro_init: predictor created OK
 [NEURO] predict raw: r_inv_m=0.1199 rho_inv=7.56285 rho_form=1216.52
 [NEURO] mapped: Ro_p=1216.52 Ro_zp=7.56285 R_zp_cm=11.99
 6925.53 6953.98 6971.56 6982.42 0 6989.14 6993.29 6993.29 6995.85 0 
-lib is close Thu Jun 11 13:04:15 2026
+lib is close Thu Jun 11 14:44:43 2026
 

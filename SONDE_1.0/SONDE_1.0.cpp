@@ -532,14 +532,54 @@ int main()
 	chart10->ChartAreas["ChartArea1"]->CursorY->Interval = 0.0000001;
 
 
-	for (int i = 0; i < 10; i++) {
-
+	// Серии 0-3: Ro FROM_SONDE 400 кГц (T1-T4), сплошная линия.
+	// Серии 4-7: Ro RO_dFI 400 кГц (T1-T4), пунктирная линия тем же цветом.
+	for (int i = 0; i < 8; i++) {
 		chart10->Series->Add("series" + i);
-		chart10->Series[i]->LegendText = L" " + i;
 		chart10->Series[i]->ChartType = SeriesChartType::Line;
 		chart10->Series[i]->BorderWidth = 2;
 	}
+	for (int Tx = 0; Tx < 4; Tx++) {
+		chart10->Series[Tx]->Color = txColors[Tx];
+		chart10->Series[Tx]->LegendText = L"Ro T" + (Tx + 1) + L" 400 (sonde)";
+		chart10->Series[Tx]->BorderDashStyle = ChartDashStyle::Solid;
+		chart10->Series[Tx + 4]->Color = txColors[Tx];
+		chart10->Series[Tx + 4]->LegendText = L"Ro T" + (Tx + 1) + L" 400 (RO_dFI)";
+		chart10->Series[Tx + 4]->BorderDashStyle = ChartDashStyle::Dash;
+	}
+	chart10->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
 
+	Chart^ chart11 = (gcnew Chart());
+	form->Controls->Add(chart11);
+	chart11->Size = System::Drawing::Size(width, 500);
+	chart11->Location = System::Drawing::Point(5, 5000);
+	chart11->ChartAreas->Add("ChartArea1");
+	chart11->Legends->Add("Legend1");
+	chart11->ChartAreas["ChartArea1"]->CursorX->IsUserSelectionEnabled = true;
+	chart11->ChartAreas["ChartArea1"]->CursorY->IsUserSelectionEnabled = true;
+	chart11->ChartAreas["ChartArea1"]->CursorX->IsUserEnabled = true;
+	chart11->ChartAreas["ChartArea1"]->CursorY->IsUserEnabled = true;
+	chart11->ChartAreas["ChartArea1"]->CursorY->Interval = 0.0000001;
+
+	for (int i = 0; i < 8; i++) {
+		chart11->Series->Add("series" + i);
+		chart11->Series[i]->ChartType = SeriesChartType::Line;
+		chart11->Series[i]->BorderWidth = 2;
+	}
+	for (int Tx = 0; Tx < 4; Tx++) {
+		chart11->Series[Tx]->Color = txColors[Tx];
+		chart11->Series[Tx]->LegendText = L"Ro T" + (Tx + 1) + L" 2000 (sonde)";
+		chart11->Series[Tx]->BorderDashStyle = ChartDashStyle::Solid;
+		chart11->Series[Tx + 4]->Color = txColors[Tx];
+		chart11->Series[Tx + 4]->LegendText = L"Ro T" + (Tx + 1) + L" 2000 (RO_dFI)";
+		chart11->Series[Tx + 4]->BorderDashStyle = ChartDashStyle::Dash;
+	}
+	chart11->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
+
+
+
+
+	
 	// === Конфигурация chart5-8: новые графики FROM_SONDE и FROM_COMPUTER с Ro_p ===
 	// chart5: симм. фазы 400 кГц из структуры (FROM_SONDE) + Ro_p на вторичной оси
 	chart5->Series[0]->LegendText = L"Ph T1 400 (sonde)";
@@ -820,8 +860,8 @@ int main()
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			chart1->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
 			chart2->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
-			chart3->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
-			chart4->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
+			chart3->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
+			chart4->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
 		}
 		get_condition(&gp_data, &condition, shift);
 		//cout << gp_data.condition << " "  << condition << endl;
@@ -847,8 +887,8 @@ int main()
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
 			chart5->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
 			chart6->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
-			chart7->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
-			chart8->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
+			chart7->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
+			chart8->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
 		}
 		chart5->Series[4]->Points->AddXY(n, ro_p);
 		chart6->Series[4]->Points->AddXY(n, ro_p);
@@ -857,10 +897,17 @@ int main()
 
 		// График 9: сопоставление удельных электрических сопротивлений на двух частотах и Ro_p нейросети.
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart9->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
-			chart9->Series[Tx + 4]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
+			chart9->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
+			chart9->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
 		}
 		chart9->Series[8]->Points->AddXY(n, ro_p);
+
+		for (int Tx = 0; Tx < N_Tx; Tx++) {
+			chart10->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
+			chart10->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
+			chart11->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
+			chart11->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
+		}
 
 		ph_smt_ro(&ro_AF, &phase_pen);
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
