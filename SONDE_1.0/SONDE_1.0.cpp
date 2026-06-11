@@ -118,7 +118,7 @@ const char* Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrolo
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\InducRAM_cut_0_1400_09_06_2026_cut_1200_2367_09_06_2026.DEV";
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Copy(1).DEV";
+const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Copy(3).DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
 //const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
@@ -474,8 +474,12 @@ int main()
 
 	Chart^  chart9 = (gcnew Chart());
 	form->Controls->Add(chart9);
-	chart9->Size = System::Drawing::Size(width, 500);
+	chart9->Size = System::Drawing::Size(form->ClientSize.Width - 10, 500);
 	chart9->Location = System::Drawing::Point(5, 4000);
+	chart9->Anchor = static_cast<System::Windows::Forms::AnchorStyles>(
+		System::Windows::Forms::AnchorStyles::Top |
+		System::Windows::Forms::AnchorStyles::Left |
+		System::Windows::Forms::AnchorStyles::Right);
 	chart9->ChartAreas->Add("ChartArea1");
 	chart9->Legends->Add("Legend1");
 	chart9->ChartAreas["ChartArea1"]->CursorX->IsUserSelectionEnabled = true;
@@ -485,13 +489,35 @@ int main()
 	chart9->ChartAreas["ChartArea1"]->CursorY->Interval = 0.0000001;
 
 
-	for (int i = 0; i < 10; i++) {
+	cli::array<System::Drawing::Color>^ txColors = gcnew cli::array<System::Drawing::Color>(4);
+	txColors[0] = System::Drawing::Color::Blue;
+	txColors[1] = System::Drawing::Color::Red;
+	txColors[2] = System::Drawing::Color::Green;
+	txColors[3] = System::Drawing::Color::Orange;
 
+	// Серии 0-3: Ro 400 кГц (T1-T4), сплошная линия.
+	// Серии 4-7: Ro 2000 кГц (T1-T4), пунктирная линия тем же цветом.
+	// Серия  8:   Ro_p на вторичной оси.
+	for (int i = 0; i < 9; i++) {
 		chart9->Series->Add("series" + i);
-		chart9->Series[i]->LegendText = L" " + i;
 		chart9->Series[i]->ChartType = SeriesChartType::Line;
 		chart9->Series[i]->BorderWidth = 2;
 	}
+	for (int Tx = 0; Tx < 4; Tx++) {
+		chart9->Series[Tx]->Color = txColors[Tx];
+		chart9->Series[Tx]->LegendText = L"Ro T" + (Tx + 1) + L" 400";
+		chart9->Series[Tx]->BorderDashStyle = ChartDashStyle::Solid;
+		chart9->Series[Tx + 4]->Color = txColors[Tx];
+		chart9->Series[Tx + 4]->LegendText = L"Ro T" + (Tx + 1) + L" 2000";
+		chart9->Series[Tx + 4]->BorderDashStyle = ChartDashStyle::Dash;
+	}
+	chart9->Series[8]->LegendText = L"Ro_p";
+	chart9->Series[8]->Color = System::Drawing::Color::Black;
+	chart9->Series[8]->BorderWidth = 3;
+	chart9->Series[8]->YAxisType = AxisType::Secondary;
+	chart9->ChartAreas["ChartArea1"]->AxisY2->Enabled = AxisEnabled::True;
+	chart9->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
+	chart9->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
 
 	Chart^  chart10 = (gcnew Chart());
 	form->Controls->Add(chart10);
@@ -829,8 +855,12 @@ int main()
 		chart7->Series[4]->Points->AddXY(n, ro_p);
 		chart8->Series[4]->Points->AddXY(n, ro_p);
 
-		
-
+		// График 9: сопоставление удельных электрических сопротивлений на двух частотах и Ro_p нейросети.
+		for (int Tx = 0; Tx < N_Tx; Tx++) {
+			chart9->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
+			chart9->Series[Tx + 4]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
+		}
+		chart9->Series[8]->Points->AddXY(n, ro_p);
 
 		ph_smt_ro(&ro_AF, &phase_pen);
 		for (int Tx = 0; Tx < N_Tx; Tx++) {
