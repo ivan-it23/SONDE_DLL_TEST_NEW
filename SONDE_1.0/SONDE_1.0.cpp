@@ -62,6 +62,7 @@ SERVICE  service_AF;
 int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
+const int kNeuroWeightsNotFound = 203;
 
 // Кэш результатов вычисления фаз зоны проникновения для исключения повторного численного интегрирования.
 struct CacheKey {
@@ -803,7 +804,16 @@ int main()
 		fdbg << "\n\n";
 	}
 
-	cout << "sonde set " << sonde_set(Metro_name, nullptr) << endl;
+	int sonde_set_result = sonde_set(Metro_name, nullptr);
+	cout << "sonde set " << sonde_set_result << endl;
+	if (sonde_set_result == kNeuroWeightsNotFound) {
+		cout << "No neural weights are available for this tool type yet." << endl;
+		return 1;
+	}
+	if (sonde_set_result != 0) {
+		cout << "sonde_set failed, code " << sonde_set_result << endl;
+		return 1;
+	}
 
 	fin.open(Data_Name, ios::binary);//открываем  файл данных
 	if (fin.is_open()) {
