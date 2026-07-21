@@ -180,6 +180,15 @@
     </EmbeddedResource>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <PropertyGroup>
+    <SondeDllProjectOutput>$(ProjectDir)..\..\SONDE_DLL_NEW\$(Platform)\$(Configuration)\SONDE_DLL_1.0.dll</SondeDllProjectOutput>
+  </PropertyGroup>
+  <Target Name="CopyCurrentSondeDll" AfterTargets="Build"
+          Condition="'$(Platform)'=='x64' and Exists('$(SondeDllProjectOutput)')">
+    <Copy SourceFiles="$(SondeDllProjectOutput)"
+          DestinationFiles="$(OutDir)SONDE_DLL_1.0.dll"
+          SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

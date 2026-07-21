@@ -12,6 +12,8 @@
 #include "function.h"
 #include <vector>
 #include <bitset>
+#include <cstring>
+#include <msclr/marshal_cppstd.h>
 #include "SONDE_1.0.h"
 
 using namespace std;
@@ -36,6 +38,7 @@ typedef int(*Ph_smt_ro)(Ro *, PHASE *);
 typedef void(*Debug_mode)(bool);
 typedef int(*Calculate_Rho_Doll_GR)(PHASE*, Ro *);
 typedef int(*Ph_smt_zp)(Ro *, PHASE *);
+typedef int(*Get_data_file_info)(const char *, uint32_t *, int *, uint32_t *);
 
 Sonde_set  sonde_set;  
 Borehole_offset  borehole_offset;  
@@ -51,6 +54,7 @@ Ph_smt_ro ph_smt_ro;
 Debug_mode debug_mode;
 Calculate_Rho_Doll_GR calculate_Rho_Doll_GR;
 Ph_smt_zp ph_smt_zp;
+Get_data_file_info get_data_file_info;
 
 struct PHASE phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen, phase_smt_2043, phase_smt_2043_corr, phase_smt_1923, Phase_shift = { 0 }, phase_zp = { 0 };
 struct Ro ro_express = { 0 }, ro_need, ro_2043, ro_AF = { 0 }, ro_required;
@@ -63,6 +67,10 @@ int D_bhole_nom = 150;
 float sigma_bhole = 0;
 float ro_bh = 0;
 const int kNeuroWeightsNotFound = 203;
+const int kFrameSignatureMismatch = 2;
+const int kDataFileOpenError = 3;
+const int kDataFileExtensionError = 4;
+const int kDataFileLayoutError = 5;
 
 // Кэш результатов вычисления фаз зоны проникновения для исключения повторного численного интегрирования.
 struct CacheKey {
@@ -106,7 +114,7 @@ void ph_smt_zp_cached(Ro* ro_AF, PHASE* phase_zp) {
 
 //const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_LWD_109_008_2024_.bin";
 //const char * Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\metro_autonm_5Tx.bin";
-const char* Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrology.bin";
+const char* kDefaultMetroName = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrology.bin";
 
 
 //const char * Metro_name =   "C:\\EXP\\NEW_DLL_TEST\\metro_107.bin";
@@ -119,14 +127,9 @@ const char* Metro_name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Metrolo
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\IndRAM_cut_0_1300_02_06_2026.DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\InducRAM_cut_0_1400_09_06_2026_cut_1200_2367_09_06_2026.DEV";
-const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Copy(3).DEV";
+const char* kDefaultDataName = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\Copy(3).DEV";
 //const char* Data_Name = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\autonom_5Tx.DEV";
 
-//const char *Pallete_dir = "C:\\Users\\Admin\\Desktop\\SONDE_DLL_TEST_NEW\\PALLETE\\";
-//const char * icp_file_name = "D:\\PALLETE\\INF_CYL_PALLETE\\inf_syl_pallete_exp.icp";
-
-//INF_CYL_PALLETE_FILE_HEADER header = { 0, };
-//vector<INF_CYL_PALLETE_R > inf_cyl_pallete_r;
 ifstream fin;
 ofstream fout;
 GP_METROLOGY metro = { 0 };
@@ -199,6 +202,7 @@ bool RequiredDllFunctionsLoaded() {
 	if (!debug_mode) ok = false;
 	if (!calculate_Rho_Doll_GR) ok = false;
 	if (!ph_smt_zp) ok = false;
+	if (!get_data_file_info) ok = false;
 	return ok;
 }
 // Нормализация фазы (рад) в диапазон (-pi, pi]. Повторяет NormalizePhase
@@ -268,12 +272,325 @@ static void DumpGpDataFrame(std::ofstream &os, int frameIndex, const GP_DATA &d)
 	os << "\n";
 }
 
+static void ClearCharts(cli::array<Chart^>^ charts) {
+	for each (Chart^ chart in charts) {
+		for each (Series^ series in chart->Series)
+			series->Points->Clear();
+	}
+}
+
+static int ProcessDataFiles(
+	String^ metrologyPath,
+	String^ dataPath,
+	cli::array<Chart^>^ charts,
+	ToolStripStatusLabel^ statusLabel,
+	String^% errorMessage) {
+	using msclr::interop::marshal_as;
+
+	errorMessage = nullptr;
+	ClearCharts(charts);
+	phase_zp_cache.clear();
+	memset(&phase, 0, sizeof(phase));
+	memset(&phase_express, 0, sizeof(phase_express));
+	memset(&phase_smt, 0, sizeof(phase_smt));
+	memset(&phase_pen, 0, sizeof(phase_pen));
+	memset(&ro_express, 0, sizeof(ro_express));
+	memset(&ro_AF, 0, sizeof(ro_AF));
+	memset(&Ro_3c, 0, sizeof(Ro_3c));
+	memset(&service_AF, 0, sizeof(service_AF));
+	condition = 0;
+
+	const string metroName = marshal_as<string>(metrologyPath);
+	const string dataName = marshal_as<string>(dataPath);
+
+	GP_METROLOGY selectedMetro = {};
+	ifstream metroInput(metroName.c_str(), ios::binary);
+	if (!metroInput.is_open()) {
+		errorMessage = L"Не удалось открыть файл метрологии:\n" + metrologyPath;
+		return 1;
+	}
+	metroInput.read(reinterpret_cast<char*>(&selectedMetro), sizeof(GP_METROLOGY));
+	if (!metroInput) {
+		errorMessage = L"Файл метрологии повреждён или имеет неверный размер:\n" + metrologyPath;
+		return 1;
+	}
+	metroInput.close();
+
+	int sondeSetResult = sonde_set(metroName.c_str(), nullptr);
+	if (sondeSetResult != 0) {
+		if (sondeSetResult == kNeuroWeightsNotFound)
+			errorMessage = L"Для прибора из выбранной метрологии отсутствуют веса нейросети.";
+		else if (sondeSetResult == 100)
+			errorMessage = L"Тип прибора из выбранной метрологии не поддерживается.";
+		else
+			errorMessage = L"Не удалось инициализировать DLL по выбранной метрологии. Код ошибки: " + Convert::ToString(sondeSetResult);
+		return sondeSetResult;
+	}
+
+	uint32_t fileFrames = 0;
+	uint32_t dataSignature = 0;
+	int frameHeaderSize = 0;
+	int dataInfoResult = get_data_file_info(
+		dataName.c_str(), &fileFrames, &frameHeaderSize, &dataSignature);
+	if (dataInfoResult != 0) {
+		switch (dataInfoResult) {
+		case kFrameSignatureMismatch:
+			errorMessage = L"Файл метрологии и файл данных относятся к разным приборам. "
+				L"Выберите файлы одного и того же конкретного прибора.";
+			break;
+		case kDataFileOpenError:
+			errorMessage = L"Не удалось открыть файл данных:\n" + dataPath;
+			break;
+		case kDataFileExtensionError:
+			errorMessage = L"Неподдерживаемый формат файла данных. Выберите файл .DEV или .bin.";
+			break;
+		case kDataFileLayoutError:
+			errorMessage = L"Файл данных повреждён или его размер не соответствует формату GP_DATA.";
+			break;
+		default:
+			errorMessage = L"Не удалось проверить файл данных. Код ошибки: " + Convert::ToString(dataInfoResult);
+			break;
+		}
+		return dataInfoResult;
+	}
+
+	SONDE_ID_DBG selectedId = DecodeSondeId(dataSignature);
+	const int transmitterCount = static_cast<int>(selectedId.N_Tx);
+	const bool lwdFamily = selectedId.type_ == 2;
+	const bool cartographLwdMode = selectedId.type_ == 3 && selectedId.mod == 9;
+	const bool neuralToolSupported =
+		transmitterCount == 4 && (lwdFamily || cartographLwdMode);
+	if (!neuralToolSupported) {
+		errorMessage = L"Нейросетевой расчёт поддерживает только приборы LWD с 4 передатчиками "
+			L"и картограф в режиме LWD.";
+		return 100;
+	}
+
+	std::ofstream fdbg("Debug_parse.txt");
+	fdbg << std::fixed << std::setprecision(6);
+	if (fdbg.is_open()) {
+		fdbg << "######## METROLOGY (" << metroName << ") ########\n";
+		fdbg << "sizeof(GP_DATA)      = " << sizeof(GP_DATA) << "\n";
+		fdbg << "sizeof(GP_METROLOGY) = " << sizeof(GP_METROLOGY) << "\n";
+		fdbg << "frame_header_size    = " << frameHeaderSize << "\n";
+		fdbg << "frame_record_size    = " << (sizeof(GP_DATA) + frameHeaderSize) << "\n";
+		fdbg << "metro.signature      = " << selectedMetro.signature << "\n";
+		fdbg << "data.signature       = " << dataSignature << "\n";
+		fdbg << "frames               = " << fileFrames << "\n\n";
+	}
+
+	ifstream dataInput(dataName.c_str(), ios::binary);
+	if (!dataInput.is_open()) {
+		errorMessage = L"Не удалось открыть файл данных:\n" + dataPath;
+		return kDataFileOpenError;
+	}
+
+	const streamoff recordSize = static_cast<streamoff>(sizeof(GP_DATA) + frameHeaderSize);
+	for (uint32_t n = 0; n < fileFrames; ++n) {
+		GP_DATA currentFrame = {};
+		const streamoff payloadOffset = static_cast<streamoff>(n) * recordSize + frameHeaderSize;
+		dataInput.seekg(payloadOffset, ios::beg);
+		dataInput.read(reinterpret_cast<char*>(&currentFrame), sizeof(GP_DATA));
+		if (!dataInput) {
+			errorMessage = L"Ошибка чтения кадра " + Convert::ToString(static_cast<unsigned int>(n)) + L" из файла данных.";
+			return kDataFileLayoutError;
+		}
+
+		gp_data = currentFrame;
+		if (fdbg.is_open() && (n < 3 || n == 300 || n == 600 || n == 900))
+			DumpGpDataFrame(fdbg, static_cast<int>(n), gp_data);
+
+		int result = get_Phase(&gp_data, &phase, 0);
+		if (result != 0) {
+			errorMessage = result == kFrameSignatureMismatch
+				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
+				: L"DLL не смогла извлечь фазы из кадра. Код ошибки: " + Convert::ToString(result);
+			return result;
+		}
+
+		result = get_express_data(&gp_data, &phase_express, &ro_express, 0);
+		if (result != 0) {
+			errorMessage = result == kFrameSignatureMismatch
+				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
+				: L"DLL не смогла извлечь данные кадра. Код ошибки: " + Convert::ToString(result);
+			return result;
+		}
+
+		result = get_condition(&gp_data, &condition, 0);
+		if (result != 0) {
+			errorMessage = result == kFrameSignatureMismatch
+				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
+				: L"DLL не смогла извлечь состояние прибора. Код ошибки: " + Convert::ToString(result);
+			return result;
+		}
+
+		result = simmetry(&phase, &phase_smt, condition);
+		if (result != 0) {
+			errorMessage = L"Не удалось выполнить симметризацию фаз. Код ошибки: " + Convert::ToString(result);
+			return result;
+		}
+
+		result = calculate_Rho_AF(&phase_express, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
+		if (result != 0) {
+			errorMessage = L"Не удалось рассчитать УЭС/параметры зоны. Код ошибки: " + Convert::ToString(result);
+			return result;
+		}
+		calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
+
+		const float roP = ro_AF.Ro_p[_400_kGz];
+		for (int tx = 0; tx < transmitterCount; ++tx) {
+			charts[0]->Series[tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][tx] * mG);
+			charts[1]->Series[tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][tx] * mG);
+			charts[2]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
+			charts[3]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
+			charts[4]->Series[tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][tx] * mG);
+			charts[5]->Series[tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][tx] * mG);
+			charts[6]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
+			charts[7]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
+			charts[8]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
+			charts[8]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
+			charts[9]->Series[tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][tx]);
+			charts[9]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
+			charts[10]->Series[tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][tx]);
+			charts[10]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
+		}
+		charts[4]->Series[4]->Points->AddXY(n, roP);
+		charts[5]->Series[4]->Points->AddXY(n, roP);
+		charts[6]->Series[4]->Points->AddXY(n, roP);
+		charts[7]->Series[4]->Points->AddXY(n, roP);
+		charts[8]->Series[8]->Points->AddXY(n, roP);
+
+		if ((n % 50) == 0 || n + 1 == fileFrames) {
+			statusLabel->Text = L"Обработка: " +
+				Convert::ToString(static_cast<unsigned int>(n + 1)) + L" / " +
+				Convert::ToString(static_cast<unsigned int>(fileFrames));
+			Application::DoEvents();
+		}
+	}
+
+	dataInput.close();
+	if (fdbg.is_open()) fdbg.close();
+	return 0;
+}
+
+public ref class TestController sealed {
+private:
+	Form^ form;
+	cli::array<Chart^>^ charts;
+	MenuStrip^ menuStrip;
+	ToolStripStatusLabel^ statusLabel;
+	String^ metrologyPath;
+	String^ dataPath;
+	bool processing;
+
+	void UpdateSelectionStatus() {
+		statusLabel->Text = L"Метрология: " + System::IO::Path::GetFileName(metrologyPath) +
+			L" | Данные: " + System::IO::Path::GetFileName(dataPath) +
+			L" | F5 — запустить";
+	}
+
+public:
+	TestController(Form^ owner, cli::array<Chart^>^ chartList, String^ defaultMetrology, String^ defaultData) {
+		form = owner;
+		charts = chartList;
+		metrologyPath = defaultMetrology;
+		dataPath = defaultData;
+		processing = false;
+
+		menuStrip = gcnew MenuStrip();
+		ToolStripMenuItem^ fileMenu = gcnew ToolStripMenuItem(L"Файл");
+		ToolStripMenuItem^ selectMetrology = gcnew ToolStripMenuItem(L"Выбрать файл метрологии...");
+		ToolStripMenuItem^ selectData = gcnew ToolStripMenuItem(L"Выбрать файл данных...");
+		ToolStripMenuItem^ runTest = gcnew ToolStripMenuItem(L"Запустить тестирование");
+		selectMetrology->ShortcutKeys = Keys::Control | Keys::M;
+		selectData->ShortcutKeys = Keys::Control | Keys::D;
+		runTest->ShortcutKeys = Keys::F5;
+		selectMetrology->Click += gcnew EventHandler(this, &TestController::OnSelectMetrology);
+		selectData->Click += gcnew EventHandler(this, &TestController::OnSelectData);
+		runTest->Click += gcnew EventHandler(this, &TestController::OnRunTest);
+		fileMenu->DropDownItems->Add(selectMetrology);
+		fileMenu->DropDownItems->Add(selectData);
+		fileMenu->DropDownItems->Add(gcnew ToolStripSeparator());
+		fileMenu->DropDownItems->Add(runTest);
+		menuStrip->Items->Add(fileMenu);
+		form->MainMenuStrip = menuStrip;
+		form->Controls->Add(menuStrip);
+
+		StatusStrip^ statusStrip = gcnew StatusStrip();
+		statusLabel = gcnew ToolStripStatusLabel();
+		statusLabel->Spring = true;
+		statusLabel->TextAlign = System::Drawing::ContentAlignment::MiddleLeft;
+		statusStrip->Items->Add(statusLabel);
+		form->Controls->Add(statusStrip);
+		menuStrip->BringToFront();
+		statusStrip->BringToFront();
+		UpdateSelectionStatus();
+	}
+
+	void OnShown(Object^ sender, EventArgs^ e) {
+		form->BeginInvoke(gcnew MethodInvoker(this, &TestController::RunSelectedFiles));
+	}
+
+	void OnSelectMetrology(Object^ sender, EventArgs^ e) {
+		OpenFileDialog^ dialog = gcnew OpenFileDialog();
+		dialog->Title = L"Выберите файл метрологии";
+		dialog->Filter = L"Файл метрологии (*.bin)|*.bin|Все файлы (*.*)|*.*";
+		dialog->FileName = metrologyPath;
+		dialog->CheckFileExists = true;
+		dialog->RestoreDirectory = true;
+		if (dialog->ShowDialog(form) == DialogResult::OK) {
+			metrologyPath = dialog->FileName;
+			UpdateSelectionStatus();
+		}
+	}
+
+	void OnSelectData(Object^ sender, EventArgs^ e) {
+		OpenFileDialog^ dialog = gcnew OpenFileDialog();
+		dialog->Title = L"Выберите файл данных";
+		dialog->Filter = L"Данные прибора (*.DEV;*.bin)|*.DEV;*.dev;*.bin|DEV (*.DEV)|*.DEV;*.dev|BIN (*.bin)|*.bin|Все файлы (*.*)|*.*";
+		dialog->FileName = dataPath;
+		dialog->CheckFileExists = true;
+		dialog->RestoreDirectory = true;
+		if (dialog->ShowDialog(form) == DialogResult::OK) {
+			dataPath = dialog->FileName;
+			UpdateSelectionStatus();
+		}
+	}
+
+	void OnRunTest(Object^ sender, EventArgs^ e) {
+		RunSelectedFiles();
+	}
+
+	void RunSelectedFiles() {
+		if (processing)
+			return;
+
+		processing = true;
+		menuStrip->Enabled = false;
+		form->UseWaitCursor = true;
+		statusLabel->Text = L"Проверка выбранных файлов...";
+		Application::DoEvents();
+
+		String^ errorMessage = nullptr;
+		int result = ProcessDataFiles(metrologyPath, dataPath, charts, statusLabel, errorMessage);
+
+		form->UseWaitCursor = false;
+		menuStrip->Enabled = true;
+		processing = false;
+		if (result == 0) {
+			statusLabel->Text = L"Готово | Метрология: " + System::IO::Path::GetFileName(metrologyPath) +
+				L" | Данные: " + System::IO::Path::GetFileName(dataPath);
+		}
+		else {
+			statusLabel->Text = L"Ошибка обработки выбранных файлов";
+			MessageBox::Show(form, errorMessage, L"SONDE — ошибка данных", MessageBoxButtons::OK, MessageBoxIcon::Error);
+		}
+	}
+};
+
 [STAThread]
 int main()
 {
-	//cout << " header_size " << sizeof(header) << endl;
-	//create_bessel_pallete();
-
 #pragma region инициализация формы для отображения графиков
 
 	Application::EnableVisualStyles();
@@ -282,10 +599,14 @@ int main()
 	Form^ form = gcnew Form;
 	form->Text = " 'RAMON FILM' production";
 	form->ClientSize = System::Drawing::Size(1200, 820);
-	form->AutoScroll = true;
+	form->AutoScroll = false;
+	Panel^ chartsPanel = gcnew Panel();
+	chartsPanel->Dock = DockStyle::Fill;
+	chartsPanel->AutoScroll = true;
+	form->Controls->Add(chartsPanel);
 
 	Chart^  chart1 = (gcnew Chart());
-	form->Controls->Add(chart1);
+	chartsPanel->Controls->Add(chart1);
 	chart1->Size = System::Drawing::Size(width, 500);
 	chart1->Location = System::Drawing::Point(5, 0);
 	chart1->ChartAreas->Add("ChartArea1");
@@ -321,7 +642,7 @@ int main()
 	//chart1->Series[5]->Color = System::Drawing::Color::Black;
 
 	Chart^  chart2 = (gcnew Chart());
-	form->Controls->Add(chart2);
+	chartsPanel->Controls->Add(chart2);
 	chart2->Size = System::Drawing::Size(width, 500);
 	chart2->Location = System::Drawing::Point(5, 500);
 	chart2->ChartAreas->Add("ChartArea1");
@@ -344,7 +665,7 @@ int main()
 	}
 
 	Chart^  chart3 = (gcnew Chart());
-	form->Controls->Add(chart3);
+	chartsPanel->Controls->Add(chart3);
 	chart3->Size = System::Drawing::Size(width, 500);
 	chart3->Location = System::Drawing::Point(5, 1000);
 	chart3->ChartAreas->Add("ChartArea1");
@@ -364,7 +685,7 @@ int main()
 	}
 
 	Chart^  chart4 = (gcnew Chart());
-	form->Controls->Add(chart4);
+	chartsPanel->Controls->Add(chart4);
 	chart4->Size = System::Drawing::Size(width, 500);
 	chart4->Location = System::Drawing::Point(5, 1500);
 	chart4->ChartAreas->Add("ChartArea1");
@@ -385,7 +706,7 @@ int main()
 	}
 
 	Chart^  chart5 = (gcnew Chart());
-	form->Controls->Add(chart5);
+	chartsPanel->Controls->Add(chart5);
 	chart5->Size = System::Drawing::Size(width, 500);
 	chart5->Location = System::Drawing::Point(5, 2000);
 	chart5->ChartAreas->Add("ChartArea1");
@@ -409,7 +730,7 @@ int main()
 	chart5->Series[4]->LegendText = L"Ro_p";
 
 	Chart^  chart6 = (gcnew Chart());
-	form->Controls->Add(chart6);
+	chartsPanel->Controls->Add(chart6);
 	chart6->Size = System::Drawing::Size(width, 500);
 	chart6->Location = System::Drawing::Point(5, 2500);
 	chart6->ChartAreas->Add("ChartArea1");
@@ -433,7 +754,7 @@ int main()
 	chart6->Series[4]->LegendText = L"Ro_p";
 
 	Chart^  chart7 = (gcnew Chart());
-	form->Controls->Add(chart7);
+	chartsPanel->Controls->Add(chart7);
 	chart7->Size = System::Drawing::Size(width, 500);
 	chart7->Location = System::Drawing::Point(5, 3000);
 	chart7->ChartAreas->Add("ChartArea1");
@@ -453,7 +774,7 @@ int main()
 	}
 
 	Chart^  chart8 = (gcnew Chart());
-	form->Controls->Add(chart8);
+	chartsPanel->Controls->Add(chart8);
 	chart8->Size = System::Drawing::Size(width, 500);
 	chart8->Location = System::Drawing::Point(5, 3500);
 	chart8->ChartAreas->Add("ChartArea1");
@@ -474,7 +795,7 @@ int main()
 	}
 
 	Chart^  chart9 = (gcnew Chart());
-	form->Controls->Add(chart9);
+	chartsPanel->Controls->Add(chart9);
 	chart9->Size = System::Drawing::Size(form->ClientSize.Width - 10, 500);
 	chart9->Location = System::Drawing::Point(5, 4000);
 	chart9->Anchor = static_cast<System::Windows::Forms::AnchorStyles>(
@@ -521,7 +842,7 @@ int main()
 	chart9->ChartAreas["ChartArea1"]->AxisY2->Title = L"Ro_p, Ом·м";
 
 	Chart^  chart10 = (gcnew Chart());
-	form->Controls->Add(chart10);
+	chartsPanel->Controls->Add(chart10);
 	chart10->Size = System::Drawing::Size(width, 500);
 	chart10->Location = System::Drawing::Point(5, 4500);
 	chart10->ChartAreas->Add("ChartArea1");
@@ -551,7 +872,7 @@ int main()
 	chart10->ChartAreas["ChartArea1"]->AxisY->Title = L"УЭС, Ом·м";
 
 	Chart^ chart11 = (gcnew Chart());
-	form->Controls->Add(chart11);
+	chartsPanel->Controls->Add(chart11);
 	chart11->Size = System::Drawing::Size(width, 500);
 	chart11->Location = System::Drawing::Point(5, 5000);
 	chart11->ChartAreas->Add("ChartArea1");
@@ -704,6 +1025,11 @@ int main()
 		cout << "Unable to find the function 'ph_smt_zp' " << endl;
 	else cout << "ph_smt_zp is  ok" << endl;
 
+	get_data_file_info = (Get_data_file_info)GetProcAddress(SONDE_3_C, "get_data_file_info");
+	if (!get_data_file_info)
+		cout << "Unable to find the function 'get_data_file_info' " << endl;
+	else cout << "get_data_file_info is  ok" << endl;
+
 #pragma endregion 
 
 	if (!RequiredDllFunctionsLoaded()) {
@@ -714,300 +1040,28 @@ int main()
 	}
 
 	debug_mode(1);
-	/*
-	pallete_in.open(iсp_file_name, ios::binary);//читаем header
-	if (!pallete_in.is_open()) {
-		cout << "Vzz_inf_cyl_pallete file not open " << endl;
-	}
-	pallete_in.read((char*)&header, sizeof(header));
-	while (!pallete_in.eof()) {
-		INF_CYL_PALLETE_R buff;
-		pallete_in.read((char*)&buff, sizeof(INF_CYL_PALLETE_R));
-		inf_cyl_pallete_r.push_back(buff);
-		//cout << buff.N << endl;
-	}
-	pallete_in.close();
 
-	int N = 1750;
-	cout << " N " << inf_cyl_pallete_r[N].N << " Ro_p " << inf_cyl_pallete_r[N].Ro_p << " Ro_zp " << inf_cyl_pallete_r[N].Ro_zp << endl;
+	cli::array<Chart^>^ charts = gcnew cli::array<Chart^>(11);
+	charts[0] = chart1;
+	charts[1] = chart2;
+	charts[2] = chart3;
+	charts[3] = chart4;
+	charts[4] = chart5;
+	charts[5] = chart6;
+	charts[6] = chart7;
+	charts[7] = chart8;
+	charts[8] = chart9;
+	charts[9] = chart10;
+	charts[10] = chart11;
 
-	for (int n_r_zp = 0; n_r_zp < 100; n_r_zp++) {
-		float PH[2][5] = { 0.0, };
-		for (int freq = 0; freq < 2; freq++) {
-			halfToFloat(inf_cyl_pallete_r[N].PH[n_r_zp][freq], (uint32_t *)PH[freq], 5);
-		}
-		for (int Tx = 0; Tx < 5; Tx++) {
-			chart1->Series[Tx]->Points->AddXY(n_r_zp, PH[_400_kGz][Tx] * mG);
-		}
-	}
-	*/
-	
-	
-	
+	TestController^ controller = gcnew TestController(
+		form,
+		charts,
+		gcnew String(kDefaultMetroName),
+		gcnew String(kDefaultDataName));
+	form->Shown += gcnew EventHandler(controller, &TestController::OnShown);
 
-	bool *start_stop = new bool;
-	*start_stop = true;
-	uint32_t *persent = new uint32_t;
-	 //create_inf_cyl_Pallete(Metro_name, iсp_file_name, start_stop, persent) ;
-
-	int file_frames = 0;
-	int struct_size = 11 + sizeof(GP_DATA);
-	int start_frame = 0;
-	int end_frame = 0;
-	float Ro_bh = 0.0f;
-	int D_bh_mm = 0;
-	int N_Tx = 4; // LWD прибор имеет 4 передатчика
-	//требуемое УЭС
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			ro_need.Ro[freq][Tx] = 40.0f;
-		}
-	}
-
-	// Отдельный файл диагностики парсинга, чтобы не смешивать с Test.txt.
-	std::ofstream fdbg("Debug_parse.txt");
-	fdbg << std::fixed << std::setprecision(6);
-
-	fin.open(Metro_name, ios::binary);//открываем  файл данных
-	if (fin.is_open()) {
-		fin.read((char*)&metro, sizeof(GP_DATA));
-		cout << "metrofile is open " << file_frames << endl;
-	}
-	fin.close();
-
-	// Дамп метрологии: размеры структур и геометрия зонда из GP_METROLOGY.
-	if (fdbg.is_open()) {
-		SONDE_ID_DBG mid = DecodeSondeId(metro.signature);
-		fdbg << "######## METROLOGY (" << Metro_name << ") ########\n";
-		fdbg << "sizeof(GP_DATA)      = " << sizeof(GP_DATA) << "\n";
-		fdbg << "sizeof(GP_METROLOGY) = " << sizeof(GP_METROLOGY) << "\n";
-		fdbg << "sizeof(PHASE)        = " << sizeof(PHASE) << "\n";
-		fdbg << "struct_size (rec+11) = " << struct_size << "\n";
-		fdbg << "metro.signature = " << metro.signature
-		     << " -> type_=" << mid.type_ << " N_Tx=" << mid.N_Tx
-		     << " mod=" << mid.mod << " number=" << mid.number << " type=" << mid.type << "\n";
-		fdbg << "metro.serial    = " << metro.serial << "\n";
-		fdbg << "metro.D_sonde_mm= " << metro.D_sonde_mm << "\n";
-		fdbg << "L1[5] = ";
-		for (int i = 0; i < 5; i++) fdbg << metro.L1[i] << " ";
-		fdbg << "\nL2[5] = ";
-		for (int i = 0; i < 5; i++) fdbg << metro.L2[i] << " ";
-		fdbg << "\nF[2]  = " << metro.F[0] << " " << metro.F[1] << "\n";
-		fdbg << "Air_zz     [400 ]: ";
-		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz[0][t] << " ";
-		fdbg << "\nAir_zz     [2000]: ";
-		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz[1][t] << " ";
-		fdbg << "\nAir_zz_amt [400 ]: ";
-		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz_amt[0][t] << " ";
-		fdbg << "\nAir_zz_amt [2000]: ";
-		for (int t = 0; t < 5; t++) fdbg << metro.Air_zz_amt[1][t] << " ";
-		fdbg << "\n\n";
-	}
-
-	int sonde_set_result = sonde_set(Metro_name, nullptr);
-	cout << "sonde set " << sonde_set_result << endl;
-	if (sonde_set_result == kNeuroWeightsNotFound) {
-		cout << "No neural weights are available for this tool type yet." << endl;
-		return 1;
-	}
-	if (sonde_set_result != 0) {
-		cout << "sonde_set failed, code " << sonde_set_result << endl;
-		return 1;
-	}
-
-	fin.open(Data_Name, ios::binary);//открываем  файл данных
-	if (fin.is_open()) {
-		fin.seekg(0, ios::end);
-		file_frames = int(fin.tellg()) / struct_size;
-		cout << "file_frames " << file_frames << endl;
-	}
-	fin.close();
-
-	if (fdbg.is_open()) {
-		fdbg << "######## DATA FRAMES (" << Data_Name << "), file_frames="
-		     << file_frames << " ########\n\n";
-	}
-
-	// Флаг однократного уведомления о проблеме разбора структуры кадра.
-	// Сообщение выводится один раз, чтобы не засорять консоль на каждом кадре.
-	bool structure_error_reported = false;
-
-	fin.open(Data_Name, ios::binary);//открываем  файл данных
-	for (int n = 0; n < file_frames; n++) {
-		gp_data = READ_BLOK_GP_DATA_DEV(fin, n);
-
-		// Диагностика: дамп первых кадров (калибровка в воздухе) и нескольких кадров
-		// из середины лога (прибор в породе) для надёжного определения раскладки полей.
-		if (fdbg.is_open() && (n < 3 || n == 300 || n == 600 || n == 900)) {
-			DumpGpDataFrame(fdbg, n, gp_data);
-		}
-
-		int get_ph_result = get_Phase(&gp_data, &phase, shift);
-		//cout << "get_ph_result "<< get_ph_result <<endl;
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			//chart1->Series[Tx]->Points->AddXY(n, gp_data.DELTA_PH[_400_kGz][Tx] * mG);
-			//chart2->Series[Tx]->Points->AddXY(n, phase.Phase[_400_kGz][Tx] * mG);
-			//chart3->Series[Tx]->Points->AddXY(n, gp_data.DELTA_PH[_2000_kGz][Tx] * mG);
-			//chart4->Series[Tx]->Points->AddXY(n, phase.Phase[_2000_kGz][Tx] * mG);
-		}
-		int express_result = get_express_data(&gp_data, &phase_express, &ro_express, shift);
-		// Ненулевой код означает, что DLL не смогла разобрать структуру кадра
-		// (например, сигнатура кадра не совпала с метрологией). В этом случае
-		// пользователь уведомляется, а данные кадра на графики не наносятся,
-		// чтобы не отображать заведомо некорректные значения.
-		if (express_result != 0) {
-			if (!structure_error_reported) {
-				cout << "WARNING: get_express_data returned code " << express_result
-				     << " at frame " << n
-				     << ". The data frame layout does not match the loaded metrology "
-				     << "(signature mismatch or unsupported structure). "
-				     << "Verify that the .DEV data file and the metrology .bin belong to the same tool."
-				     << endl;
-				structure_error_reported = true;
-			}
-			continue;
-		}
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart1->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
-			chart2->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
-			chart3->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
-			chart4->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
-		}
-		get_condition(&gp_data, &condition, shift);
-		//cout << gp_data.condition << " "  << condition << endl;
-		//cout << std::bitset<32>(gp_data.condition) << endl;
-		
-		simmetry(&phase, &phase_smt, 0xffffffff);
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			//chart1->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_400_kGz][Tx] * mG);
-			//chart2->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_2000_kGz][Tx] * mG);
-		}
-
-		
-		int pz_400 = 0; 
-		int pz_2000 = 0;
-
-		calculate_Rho_AF(&phase_express, &ro_AF, ro_bh, D_bhole_nom, pz_400, pz_2000, &service_AF);
-		calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
-		// Графики 5-8 повторяют графики 1-4 (FROM_SONDE) с добавлением Ro_p.
-		// Нейросеть возвращает единое Ro_p на обе частоты, поэтому одно и то же
-		// значение выводится на вторичную ось всех четырёх графиков.
-		float ro_p = ro_AF.Ro_p[_400_kGz];
-		// Графики 5-6 — фазы из структуры; 7-8 — УЭС из структуры. На все четыре выводится Ro_p на вторичной оси.
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart5->Series[Tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][Tx] * mG);
-			chart6->Series[Tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][Tx] * mG);
-			chart7->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
-			chart8->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
-		}
-		chart5->Series[4]->Points->AddXY(n, ro_p);
-		chart6->Series[4]->Points->AddXY(n, ro_p);
-		chart7->Series[4]->Points->AddXY(n, ro_p);
-		chart8->Series[4]->Points->AddXY(n, ro_p);
-
-		// График 9: сопоставление удельных электрических сопротивлений на двух частотах и Ro_p нейросети.
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart9->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
-			chart9->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
-		}
-		chart9->Series[8]->Points->AddXY(n, ro_p);
-
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			chart10->Series[Tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][Tx]);
-			chart10->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
-			chart11->Series[Tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][Tx]);
-			chart11->Series[Tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
-		}
-
-		ph_smt_ro(&ro_AF, &phase_pen);
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			//chart1->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_400_kGz][Tx] * mG);
-			//chart1->Series[Tx + 4]->Points->AddXY(n, 10 + phase_pen.Phase[_400_kGz][Tx] * mG);
-			//chart2->Series[Tx]->Points->AddXY(n, phase_smt.Phase[_2000_kGz][Tx] * mG);
-			//chart2->Series[Tx+4]->Points->AddXY(n, 10 + phase_pen.Phase[_2000_kGz][Tx] * mG);
-		}
-
-
-		if (n == 2000) {
-			phase_smt_1923 = phase_smt;
-			
-		}
-		if (n == 2000) {
-			phase_smt_2043 = phase_smt;
-			ro_2043 = ro_AF;
-		}
-
-		ro_corr_ref_point(Metro_name, &ro_2043, &ro_need, &ro_AF, &ro_required);
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			//chart1->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][Tx]);
-			//chart1->Series[Tx+4]->Points->AddXY(n, ro_required.Ro[_400_kGz][Tx]);
-			//chart2->Series[Tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][Tx]);
-			//chart2->Series[Tx+4]->Points->AddXY(n, ro_required.Ro[_2000_kGz][Tx]);
-		}
-
-	}
-	fin.close();
-	if (fdbg.is_open()) fdbg.close();
-
-
-	
-	// По фазе и требуемому УЭС для опорной точки вычисляется фазовая поправка.
-	cout << "ph_smt_806 ";
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			cout << phase_smt_1923.Phase[freq][Tx] * mG << " ";
-		}
-	}
-	cout << endl;
-	
-	ph_shift_smt_ph(&phase_smt_1923, &ro_need, &Phase_shift);
-	cout << "ph_shift_smt_ph ";
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			cout << Phase_shift.Phase[freq][Tx] * mG << " ";
-		}
-	}
-	cout << endl;
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			phase_smt_1923.Phase[freq][Tx] -= Phase_shift.Phase[freq][Tx] ;
-		}
-	}
-	calculate_Rho_AF(&phase_smt_1923, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			cout << ro_AF.Ro[freq][Tx] << " ";
-		}
-	}
-	cout << endl;
-	// По УЭС и требуемому УЭС для опорной точки вычисляется фазовая поправка.
-	ph_shift_smt_ro(&ro_2043, &ro_need, &Phase_shift);
-	cout << "ph_shift_smt_ro ";
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			cout << Phase_shift.Phase[freq][Tx] * mG << " ";
-		}
-	}
-	cout << endl;
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			phase_smt_2043_corr.Phase[freq][Tx] = phase_smt_2043.Phase[freq][Tx] - Phase_shift.Phase[freq][Tx];
-		}
-	}
-	calculate_Rho_AF(&phase_smt_2043_corr, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
-	for (int freq = 0; freq < 2; freq++) {
-		for (int Tx = 0; Tx < N_Tx; Tx++) {
-			cout << ro_AF.Ro[freq][Tx] << " ";
-		}
-	}
-	cout << endl;
-
-	
-	///////////////////////////////////////////////////////////////////////////
-	
-	FreeLibrary(SONDE_3_C);	// Освобождаем библиотеку
 	Application::Run(form);
-	getchar(); getchar();
+	FreeLibrary(SONDE_3_C);
 	return 0;
-
 }
