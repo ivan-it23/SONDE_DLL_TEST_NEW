@@ -8,6 +8,7 @@
 #include <complex> 
 #include <string> 
 #include <vector>
+#include <cstddef>
 //#include "bessel.h"
 #define int16_t short
 #define int32_t long
@@ -24,7 +25,7 @@ const double eps0 = 8.85*1e-12;
 const double mu0 = 4 * PI*1e-7;
 const float mV = static_cast<float>(2500 / pow(2, 28));
 const float mG = static_cast<float>(1000 * 180 / PI);
-const float sG = static_cast<float>(200 * 180 / PI);//половина сантиградуса = 0.005 градуса
+const float sG = static_cast<float>(200 * 180 / PI);//РїРѕР»РѕРІРёРЅР° СЃР°РЅС‚РёРіСЂР°РґСѓСЃР° = 0.005 РіСЂР°РґСѓСЃР°
 const float Grad = static_cast<float>(180 / PI);
 
 
@@ -70,14 +71,14 @@ struct GP_DATA {
 	uint32_t condition;
 	uint32_t frame;
 	float temperature;
-	float rho_smt[2][5];// УЭС, рассчитанные на контроллере [400, 2000][T1-T5]
-	float phase_smt[2][5];// симметризованные фазы [400, 2000][T1-T5]
-	float AM_RX_1[2][5];// амплитуды на первом приемнике [400, 2000][T1-T5]
-	float ZERO_AM_RX_1[2]; // амплитуды на первом приемнике [400, 2000] при молчащих передатчиках
-	float AM_RX_2[2][5];// амплитуды на втором приемнике[400, 2000][T1 - T5]
-	float ZERO_AM_RX_2[2];// амплитуды на втором приемнике [400, 2000] при молчащих передатчиках
-	float DELTA_PH[2][5];// сырая разница фаз [400, 2000][T1 - T5]
-	float ZERO_dPH[2];// разница фаз молчащих передатчиков;
+	float rho_smt[2][5];// РЈР­РЎ, СЂР°СЃСЃС‡РёС‚Р°РЅРЅС‹Рµ РЅР° РєРѕРЅС‚СЂРѕР»Р»РµСЂРµ [400, 2000][T1-T5]
+	float phase_smt[2][5];// СЃРёРјРјРµС‚СЂРёР·РѕРІР°РЅРЅС‹Рµ С„Р°Р·С‹ [400, 2000][T1-T5]
+	float AM_RX_1[2][5];// Р°РјРїР»РёС‚СѓРґС‹ РЅР° РїРµСЂРІРѕРј РїСЂРёРµРјРЅРёРєРµ [400, 2000][T1-T5]
+	float ZERO_AM_RX_1[2]; // Р°РјРїР»РёС‚СѓРґС‹ РЅР° РїРµСЂРІРѕРј РїСЂРёРµРјРЅРёРєРµ [400, 2000] РїСЂРё РјРѕР»С‡Р°С‰РёС… РїРµСЂРµРґР°С‚С‡РёРєР°С…
+	float AM_RX_2[2][5];// Р°РјРїР»РёС‚СѓРґС‹ РЅР° РІС‚РѕСЂРѕРј РїСЂРёРµРјРЅРёРєРµ[400, 2000][T1 - T5]
+	float ZERO_AM_RX_2[2];// Р°РјРїР»РёС‚СѓРґС‹ РЅР° РІС‚РѕСЂРѕРј РїСЂРёРµРјРЅРёРєРµ [400, 2000] РїСЂРё РјРѕР»С‡Р°С‰РёС… РїРµСЂРµРґР°С‚С‡РёРєР°С…
+	float DELTA_PH[2][5];// СЃС‹СЂР°СЏ СЂР°Р·РЅРёС†Р° С„Р°Р· [400, 2000][T1 - T5]
+	float ZERO_dPH[2];// СЂР°Р·РЅРёС†Р° С„Р°Р· РјРѕР»С‡Р°С‰РёС… РїРµСЂРµРґР°С‚С‡РёРєРѕРІ;
 	//uint8_t out_arr[8];
 	//uint32_t selected_key;
 };
@@ -91,7 +92,9 @@ struct	GP_METROLOGY {
 	int16_t Air_zz[2][5];//
 	int16_t Air_zz_amt[2][5];//
 	uint32_t D_sonde_mm;
-	uint8_t service[164];//на будущее до 240 байт !!!!
+	uint32_t work_type;
+	uint32_t Rx_Position;
+	uint16_t service[78];//СЂРµР·РµСЂРІ РґРѕ 240 Р±Р°Р№С‚
 };
 
 struct SONDE_PARAM {
@@ -113,54 +116,16 @@ struct INF_CYL {
 	complex <float> sonde[2][5];
 };
 
-struct INF_CYL_PALLETE_FILE_HEADER {
-	uint32_t tool_type;
-	uint32_t N;
-	SONDE_PARAM param[2][5];
-};
-
-struct INF_CYL_PALLETE_R {
-	uint32_t tool_type;
-	float Ro_p;
-	float Ro_zp;
-	float16_t PH[100][2][5];
-	uint32_t N;
-};
-
-struct INF_CYL_PALLETE {
-	uint32_t tool_type;
-	SONDE_PARAM param[2][5];
-	INF_CYL_PALLETE_R inf_cyl_r[270][288];
-};
-
-struct TF {
-	float Ro[4];
-	float R_zp;
-	float Ro_zp;
-	float tf;
-	float Ro_p;
-	int n_r_zp;
-	int n_Ro_p;
-	int n_Ro_zp;
-
-};
-//
-struct STATE {
-	float T;
-	float K;
-	int r_zp;
-	float ro_zp;
-	float ro_bh;
-	float ro_ls;//long sonde
-	float ro_p;//long sonde
-};
-
-struct STATE_AF {
-	float T;
-	float K;
-	int n_Ro_p;
-	int n_Ro_zp;
-	int n_r_zp;
-};
-
 #pragma pack(pop)
+
+static_assert(sizeof(GP_DATA) == 240, "GP_DATA layout must match SONDE_DLL_NEW");
+static_assert(sizeof(GP_METROLOGY) == 240, "GP_METROLOGY layout must match SONDE_DLL_NEW");
+static_assert(offsetof(GP_METROLOGY, L1) == 8, "GP_METROLOGY.L1 offset mismatch");
+static_assert(offsetof(GP_METROLOGY, L2) == 18, "GP_METROLOGY.L2 offset mismatch");
+static_assert(offsetof(GP_METROLOGY, F) == 28, "GP_METROLOGY.F offset mismatch");
+static_assert(offsetof(GP_METROLOGY, Air_zz) == 32, "GP_METROLOGY.Air_zz offset mismatch");
+static_assert(offsetof(GP_METROLOGY, Air_zz_amt) == 52, "GP_METROLOGY.Air_zz_amt offset mismatch");
+static_assert(offsetof(GP_METROLOGY, D_sonde_mm) == 72, "GP_METROLOGY.D_sonde_mm offset mismatch");
+static_assert(offsetof(GP_METROLOGY, work_type) == 76, "GP_METROLOGY.work_type offset mismatch");
+static_assert(offsetof(GP_METROLOGY, Rx_Position) == 80, "GP_METROLOGY.Rx_Position offset mismatch");
+static_assert(offsetof(GP_METROLOGY, service) == 84, "GP_METROLOGY.service offset mismatch");

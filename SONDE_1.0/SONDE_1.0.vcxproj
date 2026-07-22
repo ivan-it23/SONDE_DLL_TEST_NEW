@@ -181,13 +181,28 @@
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <PropertyGroup>
-    <SondeDllProjectOutput>$(ProjectDir)..\..\SONDE_DLL_NEW\$(Platform)\$(Configuration)\SONDE_DLL_1.0.dll</SondeDllProjectOutput>
+    <SondeDllOutputDir Condition="'$(Platform)'=='Win32'">$(ProjectDir)..\..\SONDE_DLL_NEW\$(Configuration)\</SondeDllOutputDir>
+    <SondeDllOutputDir Condition="'$(Platform)'!='Win32'">$(ProjectDir)..\..\SONDE_DLL_NEW\$(Platform)\$(Configuration)\</SondeDllOutputDir>
+    <SondeDllProjectOutput>$(SondeDllOutputDir)SONDE_DLL_1.0.dll</SondeDllProjectOutput>
   </PropertyGroup>
   <Target Name="CopyCurrentSondeDll" AfterTargets="Build"
-          Condition="'$(Platform)'=='x64' and Exists('$(SondeDllProjectOutput)')">
+          Condition="Exists('$(SondeDllProjectOutput)')">
     <Copy SourceFiles="$(SondeDllProjectOutput)"
           DestinationFiles="$(OutDir)SONDE_DLL_1.0.dll"
           SkipUnchangedFiles="true" />
+    <ItemGroup>
+      <_SondeNeuroDll Include="$(SondeDllOutputDir)NEURO_TEST.dll"
+                      Condition="Exists('$(SondeDllOutputDir)NEURO_TEST.dll')" />
+      <_SondeNeuroWeights Include="$(SondeDllOutputDir)neuro-weights\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SondeNeuroDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_SondeNeuroDll)'!=''" />
+    <Copy SourceFiles="@(_SondeNeuroWeights)"
+          DestinationFolder="$(OutDir)neuro-weights\%(RecursiveDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_SondeNeuroWeights)'!=''" />
   </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

@@ -29,7 +29,7 @@ typedef int(*Borehole_offset)(float, int );
 typedef int(*Get_express_data)(void *, PHASE *, Ro *rho, int );
 typedef int(*Get_Phase)(void *, PHASE*, int);
 typedef int(*Get_condition)(void *, uint32_t *, int);
-typedef uint8_t(*Simmetry)(PHASE*, PHASE*, uint32_t);
+typedef int(*Simmetry)(PHASE*, PHASE*, uint32_t);
 typedef int(*Calculate_Rho_AF)(PHASE*, Ro *, float, int, int, int, SERVICE*);
 typedef int(*Ph_shift_smt_ph)(PHASE *, Ro *, PHASE *);
 typedef int(*Ph_shift_smt_ro)(Ro *, Ro *, PHASE *);
@@ -39,6 +39,7 @@ typedef void(*Debug_mode)(bool);
 typedef int(*Calculate_Rho_Doll_GR)(PHASE*, Ro *);
 typedef int(*Ph_smt_zp)(Ro *, PHASE *);
 typedef int(*Get_data_file_info)(const char *, uint32_t *, int *, uint32_t *);
+typedef const char*(*Get_sonde_last_error)();
 
 Sonde_set  sonde_set;  
 Borehole_offset  borehole_offset;  
@@ -55,6 +56,7 @@ Debug_mode debug_mode;
 Calculate_Rho_Doll_GR calculate_Rho_Doll_GR;
 Ph_smt_zp ph_smt_zp;
 Get_data_file_info get_data_file_info;
+Get_sonde_last_error get_sonde_last_error;
 
 struct PHASE phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen, phase_smt_2043, phase_smt_2043_corr, phase_smt_1923, Phase_shift = { 0 }, phase_zp = { 0 };
 struct Ro ro_express = { 0 }, ro_need, ro_2043, ro_AF = { 0 }, ro_required;
@@ -71,6 +73,7 @@ const int kFrameSignatureMismatch = 2;
 const int kDataFileOpenError = 3;
 const int kDataFileExtensionError = 4;
 const int kDataFileLayoutError = 5;
+const int kMetrologySizeError = 8;
 
 // Кэш результатов вычисления фаз зоны проникновения для исключения повторного численного интегрирования.
 struct CacheKey {
@@ -203,7 +206,18 @@ bool RequiredDllFunctionsLoaded() {
 	if (!calculate_Rho_Doll_GR) ok = false;
 	if (!ph_smt_zp) ok = false;
 	if (!get_data_file_info) ok = false;
+	if (!get_sonde_last_error) ok = false;
 	return ok;
+}
+
+static String^ DllErrorMessage(int code, String^ context) {
+	String^ message = context + L" Код ошибки: " + Convert::ToString(code) + L".";
+	if (get_sonde_last_error != nullptr) {
+		const char* detail = get_sonde_last_error();
+		if (detail != nullptr && detail[0] != '\0')
+			message += L"\n\nПодробности DLL: " + gcnew String(detail);
+	}
+	return message;
 }
 // Нормализация фазы (рад) в диапазон (-pi, pi]. Повторяет NormalizePhase
 // эталонного проекта Amk-Horizon-New-Chart для режима вычисления на компьютере.
@@ -309,6 +323,15 @@ static int ProcessDataFiles(
 		errorMessage = L"Не удалось открыть файл метрологии:\n" + metrologyPath;
 		return 1;
 	}
+	metroInput.seekg(0, ios::end);
+	const streamoff metrologySize = metroInput.tellg();
+	if (metrologySize != static_cast<streamoff>(sizeof(GP_METROLOGY))) {
+		errorMessage = L"Файл метрологии должен содержать ровно 240 байт актуальной структуры. "
+			L"Фактический размер: " + Convert::ToString(static_cast<long long>(metrologySize)) +
+			L" байт.\n" + metrologyPath;
+		return kMetrologySizeError;
+	}
+	metroInput.seekg(0, ios::beg);
 	metroInput.read(reinterpret_cast<char*>(&selectedMetro), sizeof(GP_METROLOGY));
 	if (!metroInput) {
 		errorMessage = L"Файл метрологии повреждён или имеет неверный размер:\n" + metrologyPath;
@@ -318,12 +341,10 @@ static int ProcessDataFiles(
 
 	int sondeSetResult = sonde_set(metroName.c_str(), nullptr);
 	if (sondeSetResult != 0) {
-		if (sondeSetResult == kNeuroWeightsNotFound)
-			errorMessage = L"Для прибора из выбранной метрологии отсутствуют веса нейросети.";
-		else if (sondeSetResult == 100)
-			errorMessage = L"Тип прибора из выбранной метрологии не поддерживается.";
-		else
-			errorMessage = L"Не удалось инициализировать DLL по выбранной метрологии. Код ошибки: " + Convert::ToString(sondeSetResult);
+		errorMessage = DllErrorMessage(sondeSetResult,
+			sondeSetResult == kNeuroWeightsNotFound
+			? L"Для сигнатуры выбранного прибора отсутствует полный комплект нейросетевых весов."
+			: L"Не удалось инициализировать DLL по выбранной метрологии.");
 		return sondeSetResult;
 	}
 
@@ -351,13 +372,14 @@ static int ProcessDataFiles(
 			errorMessage = L"Не удалось проверить файл данных. Код ошибки: " + Convert::ToString(dataInfoResult);
 			break;
 		}
+		errorMessage = DllErrorMessage(dataInfoResult, errorMessage);
 		return dataInfoResult;
 	}
 
 	SONDE_ID_DBG selectedId = DecodeSondeId(dataSignature);
 	const int transmitterCount = static_cast<int>(selectedId.N_Tx);
 	const bool lwdFamily = selectedId.type_ == 2;
-	const bool cartographLwdMode = selectedId.type_ == 3 && selectedId.mod == 9;
+	const bool cartographLwdMode = selectedId.type_ == 3;
 	const bool neuralToolSupported =
 		transmitterCount == 4 && (lwdFamily || cartographLwdMode);
 	if (!neuralToolSupported) {
@@ -405,6 +427,7 @@ static int ProcessDataFiles(
 			errorMessage = result == kFrameSignatureMismatch
 				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
 				: L"DLL не смогла извлечь фазы из кадра. Код ошибки: " + Convert::ToString(result);
+			errorMessage = DllErrorMessage(result, errorMessage);
 			return result;
 		}
 
@@ -413,6 +436,7 @@ static int ProcessDataFiles(
 			errorMessage = result == kFrameSignatureMismatch
 				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
 				: L"DLL не смогла извлечь данные кадра. Код ошибки: " + Convert::ToString(result);
+			errorMessage = DllErrorMessage(result, errorMessage);
 			return result;
 		}
 
@@ -421,21 +445,26 @@ static int ProcessDataFiles(
 			errorMessage = result == kFrameSignatureMismatch
 				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
 				: L"DLL не смогла извлечь состояние прибора. Код ошибки: " + Convert::ToString(result);
+			errorMessage = DllErrorMessage(result, errorMessage);
 			return result;
 		}
 
 		result = simmetry(&phase, &phase_smt, condition);
 		if (result != 0) {
-			errorMessage = L"Не удалось выполнить симметризацию фаз. Код ошибки: " + Convert::ToString(result);
+			errorMessage = DllErrorMessage(result, L"Не удалось выполнить симметризацию фаз.");
 			return result;
 		}
 
 		result = calculate_Rho_AF(&phase_express, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 		if (result != 0) {
-			errorMessage = L"Не удалось рассчитать УЭС/параметры зоны. Код ошибки: " + Convert::ToString(result);
+			errorMessage = DllErrorMessage(result, L"Не удалось рассчитать УЭС/параметры зоны.");
 			return result;
 		}
-		calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
+		result = calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
+		if (result != 0) {
+			errorMessage = DllErrorMessage(result, L"Не удалось рассчитать УЭС по симметризованным фазам.");
+			return result;
+		}
 
 		const float roP = ro_AF.Ro_p[_400_kGz];
 		for (int tx = 0; tx < transmitterCount; ++tx) {
@@ -1029,6 +1058,11 @@ int main()
 	if (!get_data_file_info)
 		cout << "Unable to find the function 'get_data_file_info' " << endl;
 	else cout << "get_data_file_info is  ok" << endl;
+
+	get_sonde_last_error = (Get_sonde_last_error)GetProcAddress(SONDE_3_C, "sonde_get_last_error");
+	if (!get_sonde_last_error)
+		cout << "Unable to find the function 'sonde_get_last_error' " << endl;
+	else cout << "sonde_get_last_error is  ok" << endl;
 
 #pragma endregion 
 
