@@ -25,45 +25,40 @@ double eps = 1;
 
 HINSTANCE SONDE_3_C;// Объявляем идентификатор библиотеки
 typedef int(*Sonde_set)(const char *, const char *);
-typedef int(*Borehole_offset)(float, int );
-typedef int(*Get_express_data)(void *, PHASE *, Ro *rho, int );
-typedef int(*Get_Phase)(void *, PHASE*, int);
+typedef int(*Get_express_data)(void *, CAL_SIGNAL *, RHO *rho, int );
+typedef int(*Get_cal_signal)(void *, CAL_SIGNAL*, int);
 typedef int(*Get_condition)(void *, uint32_t *, int);
-typedef int(*Simmetry)(PHASE*, PHASE*, uint32_t);
-typedef int(*Calculate_Rho_AF)(PHASE*, Ro *, float, int, int, int, SERVICE*);
-typedef int(*Ph_shift_smt_ph)(PHASE *, Ro *, PHASE *);
-typedef int(*Ph_shift_smt_ro)(Ro *, Ro *, PHASE *);
-typedef int(*Ro_corr_ref_point)(const char *, Ro *, Ro *,Ro *, Ro *);
-typedef int(*Ph_smt_ro)(Ro *, PHASE *);
+typedef int(*Simmetry)(CAL_SIGNAL*, CAL_SIGNAL*, uint32_t);
+typedef int(*Calculate_rho)(CAL_SIGNAL*, RHO *);
+typedef int(*Calculate_Rho_AF)(CAL_SIGNAL*, RHO *, float, int, int, int, SERVICE*);
+typedef int(*Rho_corr_ref_point)(const char *, RHO *, RHO *, RHO *, RHO *);
+typedef int(*Signal_smt_from_ro)(RHO *, CAL_SIGNAL *);
 typedef void(*Debug_mode)(bool);
-typedef int(*Calculate_Rho_Doll_GR)(PHASE*, Ro *);
-typedef int(*Ph_smt_zp)(Ro *, PHASE *);
+typedef int(*Ph_smt_zp)(RHO *, CAL_SIGNAL *);
 typedef int(*Get_data_file_info)(const char *, uint32_t *, int *, uint32_t *);
 typedef const char*(*Get_sonde_last_error)();
 
-Sonde_set  sonde_set;  
-Borehole_offset  borehole_offset;  
+Sonde_set  sonde_set;
 Get_express_data get_express_data;
-Get_Phase get_Phase;
+Get_cal_signal get_cal_signal;
 Get_condition get_condition;
 Simmetry simmetry;
+Calculate_rho calculate_rho;
 Calculate_Rho_AF  calculate_Rho_AF;
-Ph_shift_smt_ph ph_shift_smt_ph;
-Ph_shift_smt_ro ph_shift_smt_ro;
-Ro_corr_ref_point ro_corr_ref_point;
-Ph_smt_ro ph_smt_ro;
+Rho_corr_ref_point rho_corr_ref_point;
+Signal_smt_from_ro signal_smt_from_ro;
 Debug_mode debug_mode;
-Calculate_Rho_Doll_GR calculate_Rho_Doll_GR;
 Ph_smt_zp ph_smt_zp;
 Get_data_file_info get_data_file_info;
 Get_sonde_last_error get_sonde_last_error;
 
-struct PHASE phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen, phase_smt_2043, phase_smt_2043_corr, phase_smt_1923, Phase_shift = { 0 }, phase_zp = { 0 };
-struct Ro ro_express = { 0 }, ro_need, ro_2043, ro_AF = { 0 }, ro_required;
+// Фазово-амплитудные сигналы и УЭС для обмена с DLL (имена сохранены с прежней
+// версии, тип сменён на CAL_SIGNAL/RHO — теперь оба канала: фаза и затухание).
+CAL_SIGNAL phase = { 0 }, phase_express = { 0 }, phase_smt = { 0 }, phase_pen = { 0 }, phase_zp = { 0 };
+RHO ro_express = { 0 }, ro_AF = { 0 }, Ro_3c = { 0 };
 uint32_t condition = 0;
 int shift = 0;
 struct GP_DATA gp_data;
-struct Ro Ro_3c, Ro_3c_AS, Ro_3c_AF;
 SERVICE  service_AF;
 int D_bhole_nom = 150;
 float sigma_bhole = 0;
@@ -87,7 +82,7 @@ struct CacheKey {
 
 struct CacheEntry {
 	CacheKey key;
-	PHASE phase;
+	CAL_SIGNAL phase;
 };
 
 std::vector<CacheEntry> phase_zp_cache;
@@ -95,10 +90,10 @@ const float kQuantStepRo = 0.1f;
 const float kQuantStepR = 1.0f;
 
 // Вычисляет симметризованные фазы зоны проникновения с кэшированием по квантованным параметрам.
-void ph_smt_zp_cached(Ro* ro_AF, PHASE* phase_zp) {
+void ph_smt_zp_cached(RHO* ro_AF, CAL_SIGNAL* phase_zp) {
 	CacheKey key;
-	key.Ro_p_q = static_cast<int>(ro_AF->Ro_p[0] / kQuantStepRo);
-	key.Ro_zp_q = static_cast<int>(ro_AF->Ro_zp[0] / kQuantStepRo);
+	key.Ro_p_q = static_cast<int>(ro_AF->rho_p[0] / kQuantStepRo);
+	key.Ro_zp_q = static_cast<int>(ro_AF->rho_zp[0] / kQuantStepRo);
 	key.R_zp_q = static_cast<int>(ro_AF->R_zp[0] / kQuantStepR);
 
 	for (const auto& entry : phase_zp_cache) {
@@ -194,16 +189,14 @@ bool RequiredDllFunctionsLoaded() {
 	bool ok = true;
 	if (!sonde_set) ok = false;
 	if (!get_express_data) ok = false;
-	if (!get_Phase) ok = false;
+	if (!get_cal_signal) ok = false;
 	if (!get_condition) ok = false;
 	if (!simmetry) ok = false;
+	if (!calculate_rho) ok = false;
 	if (!calculate_Rho_AF) ok = false;
-	if (!ph_shift_smt_ph) ok = false;
-	if (!ph_shift_smt_ro) ok = false;
-	if (!ro_corr_ref_point) ok = false;
-	if (!ph_smt_ro) ok = false;
+	if (!rho_corr_ref_point) ok = false;
+	if (!signal_smt_from_ro) ok = false;
 	if (!debug_mode) ok = false;
-	if (!calculate_Rho_Doll_GR) ok = false;
 	if (!ph_smt_zp) ok = false;
 	if (!get_data_file_info) ok = false;
 	if (!get_sonde_last_error) ok = false;
@@ -233,13 +226,14 @@ static float NormalizePhaseRad(float ph) {
 // модификацию и номер прибора. Используется только для диагностики раскладки.
 struct SONDE_ID_DBG { uint32_t type_, N_Tx, mod, number, type; };
 static SONDE_ID_DBG DecodeSondeId(uint32_t signature) {
+	// Новая схема (совпадает с get_sonde_id): младшие 6 десятичных разрядов —
+	// идентификатор прибора, старшие (signature/1000000) — размер структуры кадра.
 	SONDE_ID_DBG t;
-	uint32_t buff = (signature << 12) >> 12;
-	t.type_ = buff / 100000;
-	t.N_Tx = (buff % 100000) / 10000;
-	t.mod = (buff % 10000) / 1000;
-	t.number = (buff % 1000);
-	t.type = buff / 1000;
+	t.type = (signature % 1000000) / 1000;
+	t.type_ = (signature % 1000000) / 100000;
+	t.N_Tx = (signature % 100000) / 10000;
+	t.mod = (signature % 10000) / 1000;
+	t.number = (signature % 1000);
 	return t;
 }
 
@@ -407,12 +401,19 @@ static int ProcessDataFiles(
 		return kDataFileOpenError;
 	}
 
-	const streamoff recordSize = static_cast<streamoff>(sizeof(GP_DATA) + frameHeaderSize);
+	// Размер структуры кадра берём из сигнатуры данных (240 старая прошивка,
+	// 320 новая с амплитудным каналом); совместимо и с .DEV, и с .bin.
+	const ID dataId = get_sonde_id(dataSignature);
+	const streamoff frameDataSize = (dataId.struct_size > 0 && dataId.struct_size <= sizeof(GP_DATA))
+		? static_cast<streamoff>(dataId.struct_size)
+		: static_cast<streamoff>(sizeof(GP_DATA));
+	const streamoff recordSize = frameDataSize + frameHeaderSize;
 	for (uint32_t n = 0; n < fileFrames; ++n) {
 		GP_DATA currentFrame = {};
 		const streamoff payloadOffset = static_cast<streamoff>(n) * recordSize + frameHeaderSize;
 		dataInput.seekg(payloadOffset, ios::beg);
-		dataInput.read(reinterpret_cast<char*>(&currentFrame), sizeof(GP_DATA));
+		// Читаем ровно frameDataSize байт в обнулённую структуру (усечение по struct_size).
+		dataInput.read(reinterpret_cast<char*>(&currentFrame), frameDataSize);
 		if (!dataInput) {
 			errorMessage = L"Ошибка чтения кадра " + Convert::ToString(static_cast<unsigned int>(n)) + L" из файла данных.";
 			return kDataFileLayoutError;
@@ -422,11 +423,12 @@ static int ProcessDataFiles(
 		if (fdbg.is_open() && (n < 3 || n == 300 || n == 600 || n == 900))
 			DumpGpDataFrame(fdbg, static_cast<int>(n), gp_data);
 
-		int result = get_Phase(&gp_data, &phase, 0);
+		// Калибровка сырых измерений в фазовый и амплитудный (затухание) сигналы.
+		int result = get_cal_signal(&gp_data, &phase, 0);
 		if (result != 0) {
 			errorMessage = result == kFrameSignatureMismatch
 				? L"Обнаружен кадр от другого прибора. Обработка остановлена."
-				: L"DLL не смогла извлечь фазы из кадра. Код ошибки: " + Convert::ToString(result);
+				: L"DLL не смогла извлечь сигнал из кадра. Код ошибки: " + Convert::ToString(result);
 			errorMessage = DllErrorMessage(result, errorMessage);
 			return result;
 		}
@@ -449,39 +451,48 @@ static int ProcessDataFiles(
 			return result;
 		}
 
+		// Симметризация обоих каналов (фаза + затухание).
 		result = simmetry(&phase, &phase_smt, condition);
 		if (result != 0) {
-			errorMessage = DllErrorMessage(result, L"Не удалось выполнить симметризацию фаз.");
+			errorMessage = DllErrorMessage(result, L"Не удалось выполнить симметризацию сигнала.");
 			return result;
 		}
 
+		// Нейросетевой путь: фазовые УЭС по зондам + параметры зоны проникновения.
 		result = calculate_Rho_AF(&phase_express, &ro_AF, ro_bh, D_bhole_nom, 0, 0, &service_AF);
 		if (result != 0) {
 			errorMessage = DllErrorMessage(result, L"Не удалось рассчитать УЭС/параметры зоны.");
 			return result;
 		}
-		result = calculate_Rho_Doll_GR(&phase_smt, &Ro_3c);
+		// УЭС по фазе и по затуханию из симметризованного сигнала (золотое сечение).
+		result = calculate_rho(&phase_smt, &Ro_3c);
 		if (result != 0) {
-			errorMessage = DllErrorMessage(result, L"Не удалось рассчитать УЭС по симметризованным фазам.");
+			errorMessage = DllErrorMessage(result, L"Не удалось рассчитать УЭС по симметризованному сигналу.");
 			return result;
 		}
 
-		const float roP = ro_AF.Ro_p[_400_kGz];
+		const float roP = ro_AF.rho_p[_400_kGz];
 		for (int tx = 0; tx < transmitterCount; ++tx) {
-			charts[0]->Series[tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][tx] * mG);
-			charts[1]->Series[tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][tx] * mG);
-			charts[2]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
-			charts[3]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
-			charts[4]->Series[tx]->Points->AddXY(n, phase_express.Phase[_400_kGz][tx] * mG);
-			charts[5]->Series[tx]->Points->AddXY(n, phase_express.Phase[_2000_kGz][tx] * mG);
-			charts[6]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
-			charts[7]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
-			charts[8]->Series[tx]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
-			charts[8]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
-			charts[9]->Series[tx]->Points->AddXY(n, ro_express.Ro[_400_kGz][tx]);
-			charts[9]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_400_kGz][tx]);
-			charts[10]->Series[tx]->Points->AddXY(n, ro_express.Ro[_2000_kGz][tx]);
-			charts[10]->Series[tx + 4]->Points->AddXY(n, ro_AF.Ro[_2000_kGz][tx]);
+			// charts[0]/[1] — фазы (Series 0-3) и амплитудные затухания (Series 4-7).
+			charts[0]->Series[tx]->Points->AddXY(n, phase_express.phase[_400_kGz][tx] * mG);
+			charts[1]->Series[tx]->Points->AddXY(n, phase_express.phase[_2000_kGz][tx] * mG);
+			charts[0]->Series[tx + 4]->Points->AddXY(n, phase.att_dB[_400_kGz][tx]);
+			charts[1]->Series[tx + 4]->Points->AddXY(n, phase.att_dB[_2000_kGz][tx]);
+			// charts[2]/[3] — фазовые УЭС (Series 0-3, нейро-путь) и амплитудные УЭС (Series 4-7).
+			charts[2]->Series[tx]->Points->AddXY(n, ro_AF.rho_ph[_400_kGz][tx]);
+			charts[3]->Series[tx]->Points->AddXY(n, ro_AF.rho_ph[_2000_kGz][tx]);
+			charts[2]->Series[tx + 4]->Points->AddXY(n, Ro_3c.rho_att[_400_kGz][tx]);
+			charts[3]->Series[tx + 4]->Points->AddXY(n, Ro_3c.rho_att[_2000_kGz][tx]);
+			charts[4]->Series[tx]->Points->AddXY(n, phase_express.phase[_400_kGz][tx] * mG);
+			charts[5]->Series[tx]->Points->AddXY(n, phase_express.phase[_2000_kGz][tx] * mG);
+			charts[6]->Series[tx]->Points->AddXY(n, ro_AF.rho_ph[_400_kGz][tx]);
+			charts[7]->Series[tx]->Points->AddXY(n, ro_AF.rho_ph[_2000_kGz][tx]);
+			charts[8]->Series[tx]->Points->AddXY(n, ro_AF.rho_ph[_400_kGz][tx]);
+			charts[8]->Series[tx + 4]->Points->AddXY(n, ro_AF.rho_ph[_2000_kGz][tx]);
+			charts[9]->Series[tx]->Points->AddXY(n, ro_express.rho_ph[_400_kGz][tx]);
+			charts[9]->Series[tx + 4]->Points->AddXY(n, ro_AF.rho_ph[_400_kGz][tx]);
+			charts[10]->Series[tx]->Points->AddXY(n, ro_express.rho_ph[_2000_kGz][tx]);
+			charts[10]->Series[tx + 4]->Points->AddXY(n, ro_AF.rho_ph[_2000_kGz][tx]);
 		}
 		charts[4]->Series[4]->Points->AddXY(n, roP);
 		charts[5]->Series[4]->Points->AddXY(n, roP);
@@ -991,18 +1002,14 @@ int main()
 	if (!sonde_set)	cout << "Unable to find the function 'sonde_set' " << endl;
 	else cout << "sonde_set is  ok" << endl;
 
-	borehole_offset = (Borehole_offset)GetProcAddress(SONDE_3_C, "borehole_offset");
-	if (!borehole_offset)	cout << "Unable to find the function 'borehole_offset' " << endl;
-	else cout << "borehole_offset is  ok" << endl;
-
 	get_express_data = (Get_express_data)GetProcAddress(SONDE_3_C, "get_express_data");
 	if (!get_express_data)	cout << "Unable to find the function 'get_express_data' " << endl;
 	else cout << "get_express_data is  ok" << endl;
-	
-	get_Phase = (Get_Phase)GetProcAddress(SONDE_3_C, "get_Phase");
-	if (!get_Phase)
-		cout << "Unable to find the function 'get_Phase' " << endl;
-	else cout << "get_Phase is  ok" << endl;
+
+	get_cal_signal = (Get_cal_signal)GetProcAddress(SONDE_3_C, "get_cal_signal");
+	if (!get_cal_signal)
+		cout << "Unable to find the function 'get_cal_signal' " << endl;
+	else cout << "get_cal_signal is  ok" << endl;
 
 	get_condition = (Get_condition)GetProcAddress(SONDE_3_C, "get_condition");
 	if (!get_condition)
@@ -1014,40 +1021,30 @@ int main()
 		cout << "Unable to find the function 'simmetry' " << endl;
 	else cout << "simmetry is  ok" << endl;
 
+	calculate_rho = (Calculate_rho)GetProcAddress(SONDE_3_C, "calculate_rho");
+	if (!calculate_rho)
+		cout << "Unable to find the function 'calculate_rho' " << endl;
+	else cout << "calculate_rho is  ok" << endl;
+
 	calculate_Rho_AF = (Calculate_Rho_AF)GetProcAddress(SONDE_3_C, "calculate_Rho_AF");
 	if (!calculate_Rho_AF)
 		cout << "Unable to find the function 'calculate_Rho_AF' " << endl;
 	else cout << "calculate_Rho_AF is  ok" << endl;
 
-	ph_shift_smt_ph = (Ph_shift_smt_ph)GetProcAddress(SONDE_3_C, "ph_shift_smt_ph");
-	if (!ph_shift_smt_ph)
-		cout << "Unable to find the function 'ph_shift_smt_ph' " << endl;
-	else cout << "ph_shift_smt_ph is  ok" << endl;
+	rho_corr_ref_point = (Rho_corr_ref_point)GetProcAddress(SONDE_3_C, "rho_corr_ref_point");
+	if (!rho_corr_ref_point)
+		cout << "Unable to find the function 'rho_corr_ref_point' " << endl;
+	else cout << "rho_corr_ref_point is  ok" << endl;
 
-	ph_shift_smt_ro = (Ph_shift_smt_ro)GetProcAddress(SONDE_3_C, "ph_shift_smt_ro");
-	if (!ph_shift_smt_ro)
-		cout << "Unable to find the function 'ph_shift_smt_ro' " << endl;
-	else cout << "ph_shift_smt_ro is  ok" << endl;
-
-	ro_corr_ref_point = (Ro_corr_ref_point)GetProcAddress(SONDE_3_C, "ro_corr_ref_point");
-	if (!ro_corr_ref_point)
-		cout << "Unable to find the function 'ro_corr_ref_point' " << endl;
-	else cout << "ro_corr_ref_point is  ok" << endl;
-
-	ph_smt_ro = (Ph_smt_ro)GetProcAddress(SONDE_3_C, "ph_smt_ro");
-	if (!ph_smt_ro)
-		cout << "Unable to find the function 'ph_smt_ph' " << endl;
-	else cout << "ph_smt_ro is  ok" << endl;
+	signal_smt_from_ro = (Signal_smt_from_ro)GetProcAddress(SONDE_3_C, "signal_smt_from_ro");
+	if (!signal_smt_from_ro)
+		cout << "Unable to find the function 'signal_smt_from_ro' " << endl;
+	else cout << "signal_smt_from_ro is  ok" << endl;
 
 	debug_mode = (Debug_mode)GetProcAddress(SONDE_3_C, "debug_mode");
 	if (!debug_mode)
 		cout << "Unable to find the function 'debug_mode' " << endl;
 	else cout << "debug_mode is  ok" << endl;
-
-	calculate_Rho_Doll_GR = (Calculate_Rho_Doll_GR)GetProcAddress(SONDE_3_C, "calculate_Rho_Doll_GR");
-	if (!calculate_Rho_Doll_GR)
-		cout << "Unable to find the function 'calculate_Rho_Doll_GR' " << endl;
-	else cout << "calculate_Rho_Doll_GR is  ok" << endl;
 
 	ph_smt_zp = (Ph_smt_zp)GetProcAddress(SONDE_3_C, "ph_smt_zp");
 	if (!ph_smt_zp)

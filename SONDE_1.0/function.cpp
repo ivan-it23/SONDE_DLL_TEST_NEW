@@ -9,10 +9,10 @@
 #include "function.h"
 using namespace std;
 
-double  Ro_0 = 0.01;  //минимальное значение ус для расчета
-double  Ro_max = 10000;  //максимальное значение ус для расчета
-double epsilon_ABS = 0.0000005; // точность ,до которой возможны измерения амплитуды 
-double epsilon_ARG = 0.0000005; // точность ,до которой возможны измерения фазы
+double  Ro_0 = 0.01;  //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+double  Ro_max = 10000;  //пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
+double epsilon_ABS = 0.0000005; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ ,пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ 
+double epsilon_ARG = 0.0000005; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ ,пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅ
 double delta;
 double  ro_0 = Ro_0;
 double  ro_max = Ro_max;
@@ -149,7 +149,29 @@ GP_DATA READ_BLOK_GP_DATA_DEV(ifstream &fin, int n) {
 	fin.read((char*)buff, pre);
 	fin.read((char*)&gp_data, sizeof(GP_DATA));
 	//fin.read((char*)buff, post);
+	delete[] buff;
 	return gp_data;
+}
+
+// РњРёСЂСЂРѕСЂРёРЅРі get_sonde_id РёР· SONDE_DLL_NEW (SondeCore.cpp): РјР»Р°РґС€РёРµ 6 СЂР°Р·СЂСЏРґРѕРІ вЂ”
+// РёРґРµРЅС‚РёС„РёРєР°С‚РѕСЂ РїСЂРёР±РѕСЂР°, СЃС‚Р°СЂС€РёРµ (signature/1000000) вЂ” СЂР°Р·РјРµСЂ СЃС‚СЂСѓРєС‚СѓСЂС‹ РєР°РґСЂР°.
+ID get_sonde_id(uint32_t signature) {
+	ID tool = { 0 };
+	tool.type = (signature % 1000000) / 1000;
+	tool.type_ = (signature % 1000000) / 100000;
+	tool.N_Tx = (signature % 100000) / 10000;
+	tool.mod = (signature % 10000) / 1000;
+	tool.number = (signature % 1000);
+	if ((signature / 1000000) == 0) {
+		if (tool.type == LWD_4Tx_NEW_ || tool.type == CARTOGRAPH_LWD_4Tx_ ||
+			tool.type == AUTONOM_5Tx_ || tool.type == AUTONOM_5Tx_SDR_ || tool.type == LWD_3Tx_) {
+			tool.struct_size = 240;
+		}
+	}
+	else {
+		tool.struct_size = signature / 1000000;
+	}
+	return tool;
 }
 
 
@@ -168,15 +190,15 @@ float dFI(SONDE_PARAM param, float Ro) {
 	complex<float> ZC1 = exp(ik*(param.L1 - param.L2)) * static_cast<float>(pow((param.L2 / param.L1), 3)) * ((1.0f - ik * param.L1) / (1.0f - ik * param.L2));
 	return -arg(ZC1);
 }
-//УЭС от фазы по золотому сечению
+//пїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 float RO_dFI(SONDE_PARAM param, double dfi) {
 	float Ro0;
-	float epsilon_ARG = 0.0000005f; // точность  фазы и амплитуды 
-	float  Ro_0 = 0.01f, Ro_max = 7000.0f;  //мин. и мах. значение ус для расчета
+	float epsilon_ARG = 0.0000005f; // пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ  пїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ 
+	float  Ro_0 = 0.01f, Ro_max = 7000.0f;  //пїЅпїЅпїЅ. пїЅ пїЅпїЅпїЅ. пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅ пїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 	float delta;
 	float  ro_0 = Ro_0;
 	float  ro_max = Ro_max;
-	//  разность фаз 
+	//  пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅ 
 	do {
 		float X1 = ro_0 + 0.382f*(ro_max - ro_0);
 		float X2 = ro_max - 0.382f*(ro_max - ro_0);
